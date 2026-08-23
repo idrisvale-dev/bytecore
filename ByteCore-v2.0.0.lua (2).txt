@@ -1,0 +1,2602 @@
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualUser = game:GetService("VirtualUser")
+local PlaceId = game.PlaceId
+local RuntimeData = {
+    CurrentTarget = nil,
+    CurrentTargetPlayer = nil,
+    TargetState = nil,
+    MovementMode = nil,
+    MovementActive = false,
+    CombatState = nil,
+    CombatTarget = nil,
+    CombatStartTimestamp = nil,
+    LastCombatUpdate = nil,
+    LastEliminationTimestamp = nil,
+    NoKillTimerStartTime = nil,
+    CurrentServerJobId = nil,
+    ServerHopState = nil,
+    ServerHopReason = nil,
+    ServerHopStartTime = nil,
+    SelectedServerId = nil,
+    LastHopTime = nil,
+    AutoBountyEnabled = false,
+}
+local ConfigManager = {}
+local VALID_TEAMS = {
+    ["Pirates"] = true,
+    ["Marines"] = true,
+}
+local configIsValidated = false
+local normalizedConfig = nil
+local function validateStringField(value, fieldName, required)
+    if required then
+        if value == nil then
+            return false, string.format("[Config] ERROR: %s is required.", fieldName)
+        end
+        if type(value) ~= "string" then
+            return false, string.format("[Config] ERROR: %s must be a string.", fieldName)
+        end
+        if value == "" then
+            return false, string.format("[Config] ERROR: %s must not be empty.", fieldName)
+        end
+    else
+        if value ~= nil and type(value) ~= "string" then
+            return false, string.format("[Config] ERROR: %s must be a string if provided.", fieldName)
+        end
+    end
+    return true, nil
+end
+local function validateBooleanField(value, fieldName, required)
+    if required then
+        if value == nil then
+            return false, string.format("[Config] ERROR: %s is required.", fieldName)
+        end
+        if type(value) ~= "boolean" then
+            return false, string.format("[Config] ERROR: %s must be a boolean.", fieldName)
+        end
+    else
+        if value ~= nil and type(value) ~= "boolean" then
+            return false, string.format("[Config] ERROR: %s must be a boolean if provided.", fieldName)
+        end
+    end
+    return true, nil
+end
+local function validatePositiveNumberField(value, fieldName, required)
+    if required then
+        if value == nil then
+            return false, string.format("[Config] ERROR: %s is required.", fieldName)
+        end
+        if type(value) ~= "number" then
+            return false, string.format("[Config] ERROR: %s must be a number.", fieldName)
+        end
+        if value <= 0 then
+            return false, string.format("[Config] ERROR: %s must be a positive number.", fieldName)
+        end
+    else
+        if value ~= nil then
+            if type(value) ~= "number" then
+                return false, string.format("[Config] ERROR: %s must be a number if provided.", fieldName)
+            end
+            if value <= 0 then
+                return false, string.format("[Config] ERROR: %s must be a positive number if provided.", fieldName)
+            end
+        end
+    end
+    return true, nil
+end
+local function validateMovementMode(instantTP, followTarget)
+    if instantTP == nil or followTarget == nil then
+        return false, "[Config] ERROR: Invalid movement mode configuration."
+    end
+    if instantTP and followTarget then
+        return false, "[Config] ERROR: Both InstantTP and FollowTarget cannot be true simultaneously."
+    end
+    if not instantTP and not followTarget then
+        return false, "[Config] ERROR: At least one of InstantTP or FollowTarget must be true."
+    end
+    return true, nil
+end
+local function createNormalizedConfig(rawConfig)
+    local movementMode = if rawConfig.AutoBounty.InstantTP then "InstantTP" else "FollowTarget"
+    return {
+        ScriptKey = rawConfig.ScriptKey,
+        Team = rawConfig.Team,
+        Region = rawConfig.Region,
+        DiscordID = rawConfig.DiscordID,
+        SuperBoostFps = rawConfig.SuperBoostFps,
+        AutoBounty = {
+            Enabled = rawConfig.AutoBounty.Enabled,
+            MovementMode = movementMode,
+            NoKillTimeout = rawConfig.AutoBounty.NoKillTimeout,
+        },
+    }
+end
+function ConfigManager.Validate()
+    if _G.ByteCoreCFG == nil or type(_G.ByteCoreCFG) ~= "table" then
+        return false, "[Config] ERROR: _G.ByteCoreCFG is not defined or not a table."
+    end
+    local config = _G.ByteCoreCFG
+    local valid, err = validateStringField(config.ScriptKey, "ScriptKey", true)
+    if not valid then return false, err end
+    if config.Team == nil then
+        return false, "[Config] ERROR: Team is required."
+    end
+    if type(config.Team) ~= "string" or not VALID_TEAMS[config.Team] then
+        return false, '[Config] ERROR: Team must be exactly "Pirates" or "Marines".'
+    end
+    valid, err = validateStringField(config.Region, "Region", true)
+    if not valid then return false, err end
+    if config.DiscordID == nil then
+        return false, "[Config] ERROR: DiscordID is required."
+    end
+    if type(config.DiscordID) ~= "string" then
+        return false, "[Config] ERROR: DiscordID must be a string."
+    end
+    if config.DiscordID == "" then
+        return false, "[Config] ERROR: DiscordID is required."
+    end
+    valid, err = validateBooleanField(config.SuperBoostFps, "SuperBoostFps", true)
+    if not valid then return false, err end
+    if config.AutoBounty == nil or type(config.AutoBounty) ~= "table" then
+        return false, "[Config] ERROR: AutoBounty configuration is required."
+    end
+    valid, err = validateBooleanField(config.AutoBounty.Enabled, "AutoBounty.Enabled", true)
+    if not valid then return false, err end
+    valid, err = validateBooleanField(config.AutoBounty.InstantTP, "AutoBounty.InstantTP", true)
+    if not valid then return false, err end
+    valid, err = validateBooleanField(config.AutoBounty.FollowTarget, "AutoBounty.FollowTarget", true)
+    if not valid then return false, err end
+    valid, err = validateMovementMode(config.AutoBounty.InstantTP, config.AutoBounty.FollowTarget)
+    if not valid then return false, err end
+    valid, err = validatePositiveNumberField(config.AutoBounty.NoKillTimeout, "AutoBounty.NoKillTimeout", true)
+    if not valid then return false, err end
+    return true, nil
+end
+function ConfigManager.Initialize()
+    print("[Config] Validating configuration...")
+    local valid, err = ConfigManager.Validate()
+    if not valid then
+        warn(err)
+        return false, err
+    end
+    normalizedConfig = createNormalizedConfig(_G.ByteCoreCFG)
+    configIsValidated = true
+    print("[Config] Configuration validated.")
+    print("[Config] Team:", normalizedConfig.Team)
+    print("[Config] DiscordID validated.")
+    print("[Config] Movement mode:", normalizedConfig.AutoBounty.MovementMode)
+    return true, nil
+end
+function ConfigManager.GetConfig()
+    if not configIsValidated or normalizedConfig == nil then
+        warn("[Config] WARNING: Configuration not yet validated. Call Initialize() first.")
+        return nil
+    end
+    return normalizedConfig
+end
+function ConfigManager.IsReady()
+    return configIsValidated
+end
+function ConfigManager.Reset()
+    configIsValidated = false
+    normalizedConfig = nil
+end
+local StateManager = {}
+local VALID_STATES = {
+    ["Disabled"] = true,
+    ["Searching"] = true,
+    ["Targeting"] = true,
+    ["Engaging"] = true,
+    ["NoTarget"] = true,
+    ["WaitingForHop"] = true,
+    ["Hopping"] = true,
+}
+local currentState = "Disabled"
+local stateHistory = {}
+local MAX_HISTORY = 10
+local function addToHistory(state)
+    table.insert(stateHistory, state)
+    if #stateHistory > MAX_HISTORY then
+        table.remove(stateHistory, 1)
+    end
+end
+function StateManager.IsValidState(state)
+    return VALID_STATES[state] == true
+end
+function StateManager.GetState()
+    return currentState
+end
+function StateManager.SetState(newState)
+    if not StateManager.IsValidState(newState) then
+        warn("[State] ERROR: Invalid state:", newState)
+        return false
+    end
+    if currentState == newState then
+        return false
+    end
+    print("[State] State transition:", currentState, "→", newState)
+    currentState = newState
+    addToHistory(newState)
+    return true
+end
+function StateManager.IsState(state)
+    return currentState == state
+end
+function StateManager.Reset()
+    print("[State] Resetting to Disabled state.")
+    currentState = "Disabled"
+    stateHistory = {}
+end
+function StateManager.GetHistory()
+    local cloned = {}
+    for i, v in ipairs(stateHistory) do
+        cloned[i] = v
+    end
+    return cloned
+end
+function StateManager.GetValidStates()
+    local states = {}
+    for state, _ in pairs(VALID_STATES) do
+        table.insert(states, state)
+    end
+    table.sort(states)
+    return states
+end
+local PerformanceManager = {}
+local performanceEnabled = false
+local performanceInitialized = false
+local originalSettings = {}
+local FAST_FLAGS = {
+    {flag = "DFIntDebugFRMQualityLevelOverride", value = "1"},
+    {flag = "FIntFRMMinQualityLevel", value = "1"},
+    {flag = "FIntFRMMaxQualityLevel", value = "1"},
+    {flag = "FIntRenderShadowIntensity", value = "0"},
+    {flag = "DFIntDebugShadowMapTypeOverride", value = "0"},
+    {flag = "DFIntDebugParticleEmitterRateMultiplier", value = "0"},
+    {flag = "FIntRenderParticleRateLimit", value = "0"},
+    {flag = "DFFlagTextureQualityOverride", value = "1"},
+    {flag = "FIntTextureCompositorActiveJobs", value = "1"},
+    {flag = "FIntRenderLocalLightUpdatesMax", value = "0"},
+    {flag = "FIntRenderLocalLightUpdatesShift", value = "0"},
+    {flag = "FIntDebugForceFSMCPULightFidelity", value = "1"},
+    {flag = "FIntRenderShadowmapBias", value = "0"},
+    {flag = "FIntRenderWaterReflectionMapSize", value = "0"},
+    {flag = "DFIntDebugFRMQualityLevelOverride", value = "1"},
+    {flag = "DFIntPhysicsReceiveRate", value = "10"},
+    {flag = "FIntTerrainArraySliceSize", value = "0"},
+    {flag = "DFIntDebugRestrictGCDistance", value = "0"},
+    {flag = "FIntRenderMeshDetailLevel", value = "0"},
+    {flag = "FIntDebugGraphicsMSAA", value = "0"},
+    {flag = "DFIntAnimationLodFacs0", value = "0"},
+    {flag = "DFIntAnimationLodFacs1", value = "0"},
+    {flag = "DFIntAnimationLodFacs2", value = "0"},
+}
+local function setFastFlag(flagName, flagValue)
+    local success = false
+    if type(setfflag) == "function" then
+        local ok, err = pcall(function()
+            setfflag(flagName, flagValue)
+        end)
+        if ok then success = true end
+    end
+    if not success then
+        local ok, err = pcall(function()
+            local UserSettings = settings()
+            local GameSettings = UserSettings:GetService("UserGameSettings")
+            if GameSettings then
+                GameSettings:SetAttribute(flagName, flagValue)
+                success = true
+            end
+        end)
+    end
+    if not success then
+        local ok, err = pcall(function()
+            local UserSettings = settings()
+            if UserSettings[flagName] ~= nil then
+                UserSettings[flagName] = flagValue
+                success = true
+            end
+        end)
+    end
+    return success
+end
+local function applyFastFlags()
+    local appliedCount = 0
+    local totalFlags = #FAST_FLAGS
+    print("[Performance] Applying FastFlags for FPS boost...")
+    for _, flagData in ipairs(FAST_FLAGS) do
+        local success = setFastFlag(flagData.flag, flagData.value)
+        if success then
+            appliedCount = appliedCount + 1
+        end
+    end
+    print(string.format("[Performance] FastFlags applied: %d/%d", appliedCount, totalFlags))
+    return appliedCount > 0
+end
+local function applyGameSettings()
+    local success, result = pcall(function()
+        local UserSettings = settings()
+        local GameSettings = UserSettings:GetService("UserGameSettings")
+        if GameSettings then
+            originalSettings.GraphicsQualityLevel = GameSettings.SavedQualityLevel
+            originalSettings.MasterVolume = GameSettings.MasterVolume
+            GameSettings.SavedQualityLevel = 1
+            print("[Performance] Game settings optimized.")
+        end
+    end)
+    return success
+end
+local function applyWorkspaceOptimizations()
+    local success, result = pcall(function()
+        local terrain = Workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            pcall(function()
+                terrain.Decoration = false
+            end)
+        end
+        local lighting = game:GetService("Lighting")
+        if lighting then
+            pcall(function()
+                lighting.GlobalShadows = false
+                lighting.FogEnd = 100000
+                lighting.Brightness = 1
+            end)
+        end
+        print("[Performance] Workspace optimizations applied.")
+    end)
+    return success
+end
+function PerformanceManager.Initialize()
+    local config = ConfigManager.GetConfig()
+    if not config then
+        warn("[Performance] ERROR: Configuration not available. Cannot initialize PerformanceManager.")
+        return false
+    end
+    performanceEnabled = config.SuperBoostFps
+    performanceInitialized = true
+    if performanceEnabled then
+        print("[Performance] SuperBoostFps: Enabled")
+        print("[Performance] Applying performance optimizations...")
+        local flagsApplied = applyFastFlags()
+        local settingsApplied = applyGameSettings()
+        local workspaceApplied = applyWorkspaceOptimizations()
+        if flagsApplied or settingsApplied or workspaceApplied then
+            print("[Performance] Performance optimizations active.")
+            print("[Performance] FPS boost enabled - effects reduced for better performance.")
+        else
+            warn("[Performance] WARNING: Could not apply all optimizations.")
+            warn("[Performance] Some features may require specific exploit support.")
+        end
+    else
+        print("[Performance] SuperBoostFps: Disabled")
+    end
+    return true
+end
+function PerformanceManager.IsEnabled()
+    if not performanceInitialized then
+        warn("[Performance] WARNING: PerformanceManager not yet initialized.")
+        return false
+    end
+    return performanceEnabled
+end
+function PerformanceManager.IsReady()
+    return performanceInitialized
+end
+function PerformanceManager.Reset()
+    if performanceEnabled then
+        pcall(function()
+            local UserSettings = settings()
+            local GameSettings = UserSettings:GetService("UserGameSettings")
+            if GameSettings and originalSettings.GraphicsQualityLevel then
+                GameSettings.SavedQualityLevel = originalSettings.GraphicsQualityLevel
+            end
+            local lighting = game:GetService("Lighting")
+            if lighting then
+                lighting.GlobalShadows = true
+            end
+            local terrain = Workspace:FindFirstChildOfClass("Terrain")
+            if terrain then
+                pcall(function()
+                    terrain.Decoration = true
+                end)
+            end
+        end)
+    end
+    performanceEnabled = false
+    performanceInitialized = false
+    originalSettings = {}
+end
+local SafeZoneChecker = {
+    Name = "SafeZoneChecker",
+    Version = "1.0.0",
+}
+local safeZoneActive = false
+local safeZoneCache = {}
+local CACHE_EXPIRY = 1
+local SAFE_ZONE_INDICATORS = {
+    "SafeZone",
+    "SafeArea",
+    "SpawnPoint",
+    "SpawnLocation",
+    "PvPDisabled",
+    "NoPvP",
+}
+local SPAWN_DETECTION_RADIUS = 100
+local function cleanSafeZoneCache()
+    local now = tick()
+    for playerKey, entry in pairs(safeZoneCache) do
+        if now - entry.timestamp > CACHE_EXPIRY * 2 then
+            safeZoneCache[playerKey] = nil
+        end
+    end
+end
+local function getCachedSafeZoneState(player)
+    local playerKey = tostring(player.UserId)
+    local entry = safeZoneCache[playerKey]
+    if entry then
+        local now = tick()
+        if now - entry.timestamp <= CACHE_EXPIRY then
+            return entry.isInSafeZone
+        end
+    end
+    return nil
+end
+local function setCachedSafeZoneState(player, isInSafeZone)
+    local playerKey = tostring(player.UserId)
+    safeZoneCache[playerKey] = {
+        timestamp = tick(),
+        isInSafeZone = isInSafeZone,
+    }
+end
+local function isNearSpawn(player)
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then
+            return false
+        end
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then
+            return false
+        end
+        local playerPosition = rootPart.Position
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("SpawnLocation") then
+                local distance = (obj.Position - playerPosition).Magnitude
+                if distance <= SPAWN_DETECTION_RADIUS then
+                    return true
+                end
+            end
+        end
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                for _, indicator in ipairs(SAFE_ZONE_INDICATORS) do
+                    if string.find(string.lower(obj.Name), string.lower(indicator)) then
+                        local distance = (obj.Position - playerPosition).Magnitude
+                        if distance <= SPAWN_DETECTION_RADIUS then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+        return false
+    end)
+    if success then
+        return result
+    else
+        return false
+    end
+end
+local function hasPvPDisabledState(player)
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then
+            return false
+        end
+        local pvpDisabled = character:GetAttribute("PvPDisabled")
+        if pvpDisabled == true then
+            return true
+        end
+        local inSafeZone = character:GetAttribute("InSafeZone")
+        if inSafeZone == true then
+            return true
+        end
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("BoolValue") then
+                local name = string.lower(child.Name)
+                if string.find(name, "pvp") and not child.Value then
+                    return true
+                end
+                if string.find(name, "safe") and child.Value then
+                    return true
+                end
+            end
+        end
+        local safeZoneTag = character:FindFirstChild("SafeZoneTag")
+        if safeZoneTag then
+            return true
+        end
+        return false
+    end)
+    if success then
+        return result
+    else
+        return false
+    end
+end
+local function detectSafeZoneStatus(player)
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then
+            return false
+        end
+        if hasPvPDisabledState(player) then
+            return true
+        end
+        if isNearSpawn(player) then
+            return true
+        end
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            local position = rootPart.Position
+            if position.Y > 1000 then
+            end
+        end
+        return false
+    end)
+    if success then
+        return result
+    else
+        return false
+    end
+end
+function SafeZoneChecker.IsPlayerInSafeZone(player)
+    if not player or not player:IsA("Player") then
+        return false
+    end
+    local cachedResult = getCachedSafeZoneState(player)
+    if cachedResult ~= nil then
+        return cachedResult
+    end
+    local isInSafeZone = detectSafeZoneStatus(player)
+    setCachedSafeZoneState(player, isInSafeZone)
+    return isInSafeZone
+end
+function SafeZoneChecker.IsInSafeZone(position)
+    if not position or typeof(position) ~= "Vector3" then
+        return false
+    end
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("SpawnLocation") then
+            local distance = (obj.Position - position).Magnitude
+            if distance <= SPAWN_DETECTION_RADIUS then
+                return true
+            end
+        end
+    end
+    return false
+end
+function SafeZoneChecker.IsActive()
+    return safeZoneActive
+end
+function SafeZoneChecker.Reset()
+    safeZoneCache = {}
+end
+function SafeZoneChecker.Initialize()
+    print("[SafeZone] SafeZoneChecker initialized.")
+    print("[SafeZone] Detection methods: PvP state, spawn proximity, workspace indicators")
+    safeZoneActive = true
+    safeZoneCache = {}
+    return true
+end
+function SafeZoneChecker.Cleanup()
+    safeZoneActive = false
+    safeZoneCache = {}
+end
+local PvPChecker = {
+    Name = "PvPChecker",
+    Version = "1.0.0",
+}
+local pvpCheckerActive = false
+local pvpCache = {}
+local PVP_CACHE_EXPIRY = 0.5
+local MIN_PVP_LEVEL = 20
+local function cleanPvPCache()
+    local now = tick()
+    for playerKey, entry in pairs(pvpCache) do
+        if now - entry.timestamp > PVP_CACHE_EXPIRY * 2 then
+            pvpCache[playerKey] = nil
+        end
+    end
+end
+local function getCachedPvPState(player)
+    local playerKey = tostring(player.UserId)
+    local entry = pvpCache[playerKey]
+    if entry then
+        local now = tick()
+        if now - entry.timestamp <= PVP_CACHE_EXPIRY then
+            return entry.isEligible
+        end
+    end
+    return nil
+end
+local function setCachedPvPState(player, isEligible)
+    local playerKey = tostring(player.UserId)
+    pvpCache[playerKey] = {
+        timestamp = tick(),
+        isEligible = isEligible,
+    }
+end
+local function getPlayerLevel(player)
+    local success, result = pcall(function()
+        local leaderstats = player:FindFirstChild("leaderstats")
+        if not leaderstats then
+            return nil
+        end
+        local levelValue = leaderstats:FindFirstChild("Level")
+            or leaderstats:FindFirstChild("level")
+            or leaderstats:FindFirstChild("LVL")
+            or leaderstats:FindFirstChild("lvl")
+        if levelValue and levelValue:IsA("ValueBase") then
+            return levelValue.Value
+        end
+        return nil
+    end)
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+local function hasPvPEnabled(player)
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then
+            return nil
+        end
+        local pvpEnabled = character:GetAttribute("PvPEnabled")
+        if pvpEnabled ~= nil then
+            return pvpEnabled == true
+        end
+        local pvpValue = character:FindFirstChild("PvPEnabled")
+        if pvpValue and pvpValue:IsA("BoolValue") then
+            return pvpValue.Value
+        end
+        local pvpDisabled = character:GetAttribute("PvPDisabled")
+        if pvpDisabled ~= nil then
+            return pvpDisabled ~= true
+        end
+        local pvpDisabledValue = character:FindFirstChild("PvPDisabled")
+        if pvpDisabledValue and pvpDisabledValue:IsA("BoolValue") then
+            return not pvpDisabledValue.Value
+        end
+        return nil
+    end)
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+local function isInNonPvPState(player)
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then
+            return true
+        end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid then
+            return true
+        end
+        if humanoid:GetState() == Enum.HumanoidStateType.Dead then
+            return true
+        end
+        local playerGui = player:FindFirstChild("PlayerGui")
+        if playerGui then
+            local loadingScreen = playerGui:FindFirstChild("LoadingScreen")
+            if loadingScreen and loadingScreen.Visible then
+                return true
+            end
+        end
+        return false
+    end)
+    if success then
+        return result
+    else
+        return true
+    end
+end
+local function detectPvPEligibility(player)
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then
+            return false
+        end
+        if isInNonPvPState(player) then
+            return false
+        end
+        local level = getPlayerLevel(player)
+        if level ~= nil and level < MIN_PVP_LEVEL then
+            return false
+        end
+        local pvpEnabled = hasPvPEnabled(player)
+        if pvpEnabled == false then
+            return false
+        end
+        return true
+    end)
+    if success then
+        return result
+    else
+        return true
+    end
+end
+function PvPChecker.IsEligibleForPvP(player)
+    if not player or not player:IsA("Player") then
+        return false
+    end
+    local cachedResult = getCachedPvPState(player)
+    if cachedResult ~= nil then
+        return cachedResult
+    end
+    local isEligible = detectPvPEligibility(player)
+    setCachedPvPState(player, isEligible)
+    return isEligible
+end
+function PvPChecker.IsPvPEnabled(player)
+    return PvPChecker.IsEligibleForPvP(player)
+end
+function PvPChecker.IsActive()
+    return pvpCheckerActive
+end
+function PvPChecker.Reset()
+    pvpCache = {}
+end
+function PvPChecker.Initialize()
+    print("[PvP] PvPChecker initialized.")
+    print("[PvP] Detection methods: Level check, PvP state, loading state")
+    pvpCheckerActive = true
+    pvpCache = {}
+    return true
+end
+function PvPChecker.Cleanup()
+    pvpCheckerActive = false
+    pvpCache = {}
+end
+local TargetManager = {
+    Name = "TargetManager",
+    Version = "1.0.0",
+}
+local currentTarget = nil
+local currentTargetUserId = nil
+local eligibleTargetsCache = {}
+local lastRefreshTime = 0
+local REFRESH_COOLDOWN = 2
+local lastRejectionLog = 0
+local REJECTION_LOG_COOLDOWN = 5
+local function getLocalPlayer()
+    return Players.LocalPlayer
+end
+local function IsValidTeamTarget(player)
+    local config = ConfigManager.GetConfig()
+    if not config then
+        return false
+    end
+    local configuredTeam = config.Team
+    if configuredTeam == "Pirates" then
+        if player.Team then
+            local teamName = player.Team.Name
+            if teamName == "Pirates" or teamName == "Marines" then
+                return true
+            end
+        end
+        return true
+    end
+    if configuredTeam == "Marines" then
+        if player.Team then
+            local teamName = player.Team.Name
+            if teamName == "Pirates" then
+                return true
+            end
+            if teamName == "Marines" then
+                return false
+            end
+        end
+        return true
+    end
+    return false
+end
+local function isCharacterValid(player)
+    if not player then
+        return false
+    end
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then
+            return false
+        end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not humanoid then
+            return false
+        end
+        if humanoid.Health <= 0 then
+            return false
+        end
+        if not character.PrimaryPart then
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            if not rootPart then
+                return false
+            end
+        end
+        return true
+    end)
+    if success then
+        return result
+    else
+        return false
+    end
+end
+function TargetManager.IsValidTarget(player)
+    if not player or not player:IsA("Player") then
+        return false
+    end
+    local localPlayer = getLocalPlayer()
+    if player == localPlayer then
+        return false
+    end
+    if not IsValidTeamTarget(player) then
+        return false
+    end
+    if not isCharacterValid(player) then
+        return false
+    end
+    if SafeZoneChecker.IsActive() and SafeZoneChecker.IsPlayerInSafeZone(player) then
+        local now = tick()
+        if now - lastRejectionLog >= REJECTION_LOG_COOLDOWN then
+            print("[Target] Target rejected by SafeZoneChecker.")
+            lastRejectionLog = now
+        end
+        return false
+    end
+    if PvPChecker.IsActive() and not PvPChecker.IsEligibleForPvP(player) then
+        local now = tick()
+        if now - lastRejectionLog >= REJECTION_LOG_COOLDOWN then
+            print("[Target] Target rejected by PvPChecker.")
+            lastRejectionLog = now
+        end
+        return false
+    end
+    return true
+end
+function TargetManager.GetPlayers()
+    local localPlayer = getLocalPlayer()
+    local players = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player and player:IsA("Player") and player ~= localPlayer then
+            table.insert(players, player)
+        end
+    end
+    return players
+end
+function TargetManager.GetEligibleTargets()
+    local allPlayers = TargetManager.GetPlayers()
+    local eligible = {}
+    for _, player in ipairs(allPlayers) do
+        if TargetManager.IsValidTarget(player) then
+            table.insert(eligible, player)
+        end
+    end
+    return eligible
+end
+function TargetManager.RefreshTargets()
+    local now = tick()
+    if now - lastRefreshTime < REFRESH_COOLDOWN then
+        return #eligibleTargetsCache
+    end
+    cleanSafeZoneCache()
+    cleanPvPCache()
+    eligibleTargetsCache = TargetManager.GetEligibleTargets()
+    lastRefreshTime = now
+    local count = #eligibleTargetsCache
+    if count > 0 then
+        print("[Target] Eligible targets:", count)
+    else
+        print("[Target] No eligible targets found.")
+    end
+    return count
+end
+function TargetManager.SelectTarget()
+    TargetManager.RefreshTargets()
+    if #eligibleTargetsCache == 0 then
+        return nil
+    end
+    local selected = eligibleTargetsCache[1]
+    if selected and selected.Parent and TargetManager.IsValidTarget(selected) then
+        return selected
+    end
+    for i = 2, #eligibleTargetsCache do
+        local candidate = eligibleTargetsCache[i]
+        if candidate and candidate.Parent and TargetManager.IsValidTarget(candidate) then
+            return candidate
+        end
+    end
+    return nil
+end
+function TargetManager.SetCurrentTarget(player)
+    if not player or not player:IsA("Player") then
+        warn("[Target] ERROR: Cannot set invalid player as target.")
+        return false
+    end
+    currentTarget = player
+    currentTargetUserId = player.UserId
+    RuntimeData.CurrentTarget = {
+        Player = player,
+        UserId = player.UserId,
+        DisplayName = player.DisplayName,
+        Name = player.Name,
+    }
+    RuntimeData.CurrentTargetPlayer = player
+    RuntimeData.TargetState = "Active"
+    print("[Target] Selected target:", player.DisplayName, "(" .. player.Name .. ")")
+    return true
+end
+function TargetManager.GetCurrentTarget()
+    return currentTarget
+end
+function TargetManager.ClearCurrentTarget()
+    if currentTarget then
+        print("[Target] Current target cleared.")
+    end
+    currentTarget = nil
+    currentTargetUserId = nil
+    RuntimeData.CurrentTarget = nil
+    RuntimeData.CurrentTargetPlayer = nil
+    RuntimeData.TargetState = nil
+end
+function TargetManager.HasTarget()
+    return currentTarget ~= nil
+end
+function TargetManager.IsCurrentTargetValid()
+    if not currentTarget then
+        return false
+    end
+    if not currentTarget.Parent then
+        return false
+    end
+    if not TargetManager.IsValidTarget(currentTarget) then
+        return false
+    end
+    return true
+end
+function TargetManager.Initialize()
+    print("[Target] TargetManager initialized.")
+    print("[Target] Eligibility pipeline: Player → LocalPlayer → Team → Character → SafeZone → PvP")
+    local config = ConfigManager.GetConfig()
+    if config then
+        if config.Team == "Pirates" then
+            print("[Target] Team mode: Pirates → Targets BOTH teams (Pirates + Marines)")
+        elseif config.Team == "Marines" then
+            print("[Target] Team mode: Marines → Targets Pirates ONLY")
+        end
+    end
+    TargetManager.ClearCurrentTarget()
+    eligibleTargetsCache = {}
+    lastRefreshTime = 0
+    lastRejectionLog = 0
+    return true
+end
+function TargetManager.Cleanup()
+    TargetManager.ClearCurrentTarget()
+    eligibleTargetsCache = {}
+    lastRefreshTime = 0
+    lastRejectionLog = 0
+end
+local MovementManager = {
+    Name = "MovementManager",
+    Version = "1.0.0",
+}
+local movementActive = false
+local movementMode = nil
+local trackedTarget = nil
+local trackedTargetUserId = nil
+local heartbeatConnection = nil
+local localCharacterAddedConn = nil
+local FOLLOW_DISTANCE = 3
+local FOLLOW_HEIGHT_OFFSET = 0
+local INSTANT_TP_DISTANCE = 5
+local INSTANT_TP_HEIGHT_OFFSET = 0
+local function getLocalRootPart()
+    local success, result = pcall(function()
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer then
+            return nil
+        end
+        local character = localPlayer.Character
+        if not character then
+            return nil
+        end
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        return rootPart
+    end)
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+local function getLocalHumanoid()
+    local success, result = pcall(function()
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer then
+            return nil
+        end
+        local character = localPlayer.Character
+        if not character then
+            return nil
+        end
+        return character:FindFirstChildOfClass("Humanoid")
+    end)
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+local function getTargetRootPart(targetPlayer)
+    local success, result = pcall(function()
+        if not targetPlayer then
+            return nil
+        end
+        local character = targetPlayer.Character
+        if not character then
+            return nil
+        end
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        return rootPart
+    end)
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+local function isTrackedTargetValid()
+    if not trackedTarget then
+        return false
+    end
+    local currentTarget = TargetManager.GetCurrentTarget()
+    if currentTarget ~= trackedTarget then
+        return false
+    end
+    if not trackedTarget.Parent then
+        return false
+    end
+    local targetRoot = getTargetRootPart(trackedTarget)
+    if not targetRoot then
+        return false
+    end
+    return true
+end
+local function performFollowStep()
+    local localHumanoid = getLocalHumanoid()
+    local localRoot = getLocalRootPart()
+    if not localHumanoid or not localRoot then
+        return false
+    end
+    local targetRoot = getTargetRootPart(trackedTarget)
+    if not targetRoot then
+        return false
+    end
+    local targetCFrame = targetRoot.CFrame
+    local followPosition = targetCFrame.Position - (targetCFrame.LookVector * FOLLOW_DISTANCE)
+    followPosition = followPosition + Vector3.new(0, FOLLOW_HEIGHT_OFFSET, 0)
+    local success, err = pcall(function()
+        localHumanoid:MoveTo(followPosition)
+    end)
+    if not success then
+        return false
+    end
+    return true
+end
+local function performInstantTP()
+    local localRoot = getLocalRootPart()
+    if not localRoot then
+        return false
+    end
+    local targetRoot = getTargetRootPart(trackedTarget)
+    if not targetRoot then
+        return false
+    end
+    local success, result = pcall(function()
+        local targetCFrame = targetRoot.CFrame
+        local targetPosition = targetCFrame.Position
+        local offset = targetCFrame.LookVector * INSTANT_TP_DISTANCE
+        local heightOffset = Vector3.new(0, INSTANT_TP_HEIGHT_OFFSET, 0)
+        local teleportPosition = targetPosition - offset + heightOffset
+        local teleportCFrame = CFrame.new(teleportPosition, targetPosition)
+        localRoot.CFrame = teleportCFrame
+    end)
+    if success then
+        return true
+    else
+        return false
+    end
+end
+local function stopMovement()
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+        heartbeatConnection = nil
+    end
+    local localHumanoid = getLocalHumanoid()
+    if localHumanoid then
+        pcall(function()
+            localHumanoid:MoveTo(localHumanoid.Parent.PrimaryPart.Position)
+        end)
+    end
+    trackedTarget = nil
+    trackedTargetUserId = nil
+    movementActive = false
+    RuntimeData.MovementActive = false
+end
+local function startFollowLoop()
+    if not trackedTarget then
+        return false
+    end
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+        heartbeatConnection = nil
+    end
+    movementActive = true
+    RuntimeData.MovementActive = true
+    heartbeatConnection = RunService.Heartbeat:Connect(function()
+        if not movementActive then
+            return
+        end
+        if not isTrackedTargetValid() then
+            stopMovement()
+            print("[Movement] Target became invalid.")
+            return
+        end
+        performFollowStep()
+    end)
+    return true
+end
+local function startInstantTPLoop()
+    if not trackedTarget then
+        return false
+    end
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+        heartbeatConnection = nil
+    end
+    movementActive = true
+    RuntimeData.MovementActive = true
+    heartbeatConnection = RunService.Heartbeat:Connect(function()
+        if not movementActive then
+            return
+        end
+        if not isTrackedTargetValid() then
+            stopMovement()
+            print("[Movement] Target became invalid.")
+            return
+        end
+        performInstantTP()
+    end)
+    return true
+end
+local function onLocalCharacterAdded(character)
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    local rootPart = character:WaitForChild("HumanoidRootPart", 5)
+    if not humanoid or not rootPart then
+        return
+    end
+    if trackedTarget then
+        task.wait(0.5)
+        if isTrackedTargetValid() then
+            if movementMode == "FollowTarget" then
+                startFollowLoop()
+                print("[Movement] Follow mode resumed after respawn.")
+            elseif movementMode == "InstantTP" then
+                startInstantTPLoop()
+                print("[Movement] InstantTP mode resumed after respawn.")
+            end
+        else
+            stopMovement()
+        end
+    end
+end
+local function setupCharacterHandling()
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer then
+        return
+    end
+    if localCharacterAddedConn then
+        localCharacterAddedConn:Disconnect()
+        localCharacterAddedConn = nil
+    end
+    localCharacterAddedConn = localPlayer.CharacterAdded:Connect(onLocalCharacterAdded)
+end
+function MovementManager.StartFollow()
+    local target = TargetManager.GetCurrentTarget()
+    if not target then
+        print("[Movement] No target to follow.")
+        return false
+    end
+    stopMovement()
+    trackedTarget = target
+    trackedTargetUserId = target.UserId
+    movementMode = "FollowTarget"
+    local success = startFollowLoop()
+    if success then
+        print("[Movement] Following target:", target.DisplayName or target.Name)
+    else
+        print("[Movement] Failed to start follow mode.")
+        stopMovement()
+    end
+    return success
+end
+function MovementManager.StartInstantTP()
+    local target = TargetManager.GetCurrentTarget()
+    if not target then
+        print("[Movement] No target for InstantTP.")
+        return false
+    end
+    stopMovement()
+    trackedTarget = target
+    trackedTargetUserId = target.UserId
+    movementMode = "InstantTP"
+    local success = startInstantTPLoop()
+    if success then
+        print("[Movement] InstantTP to target:", target.DisplayName or target.Name)
+    else
+        print("[Movement] Failed to start InstantTP.")
+        stopMovement()
+    end
+    return success
+end
+function MovementManager.Stop()
+    if movementActive then
+        print("[Movement] Movement stopped.")
+    end
+    stopMovement()
+end
+function MovementManager.IsMoving()
+    return movementActive
+end
+function MovementManager.GetMovementMode()
+    local config = ConfigManager.GetConfig()
+    if config and config.AutoBounty then
+        return config.AutoBounty.MovementMode
+    end
+    return nil
+end
+function MovementManager.GetTrackedTarget()
+    return trackedTarget
+end
+function MovementManager.Update()
+    local config = ConfigManager.GetConfig()
+    if not config or not config.AutoBounty then
+        return
+    end
+    local configuredMode = config.AutoBounty.MovementMode
+    if configuredMode == "InstantTP" then
+        local currentTarget = TargetManager.GetCurrentTarget()
+        if currentTarget ~= trackedTarget then
+            if currentTarget then
+                print("[Movement] Target changed.")
+                MovementManager.StartInstantTP()
+            else
+                print("[Movement] Target cleared, stopping movement.")
+                stopMovement()
+            end
+        elseif currentTarget and not movementActive then
+            MovementManager.StartInstantTP()
+        end
+    elseif configuredMode == "FollowTarget" then
+        local currentTarget = TargetManager.GetCurrentTarget()
+        if currentTarget ~= trackedTarget then
+            if currentTarget then
+                print("[Movement] Target changed.")
+                MovementManager.StartFollow()
+            else
+                print("[Movement] Target cleared, stopping movement.")
+                stopMovement()
+            end
+        elseif currentTarget and not movementActive then
+            MovementManager.StartFollow()
+        end
+    end
+end
+function MovementManager.Initialize()
+    local config = ConfigManager.GetConfig()
+    if config and config.AutoBounty then
+        movementMode = config.AutoBounty.MovementMode
+    end
+    setupCharacterHandling()
+    movementActive = false
+    trackedTarget = nil
+    trackedTargetUserId = nil
+    RuntimeData.MovementActive = false
+    if movementMode == "FollowTarget" then
+        print("[Movement] MovementManager initialized.")
+        print("[Movement] Follow mode enabled.")
+    elseif movementMode == "InstantTP" then
+        print("[Movement] MovementManager initialized.")
+        print("[Movement] InstantTP mode enabled.")
+    else
+        print("[Movement] MovementManager initialized.")
+    end
+    return true
+end
+function MovementManager.Cleanup()
+    stopMovement()
+    if localCharacterAddedConn then
+        localCharacterAddedConn:Disconnect()
+        localCharacterAddedConn = nil
+    end
+    movementActive = false
+    movementMode = nil
+    trackedTarget = nil
+    trackedTargetUserId = nil
+    heartbeatConnection = nil
+    RuntimeData.MovementActive = false
+end
+local CombatManager = {
+    Name = "CombatManager",
+    Version = "1.0.0",
+}
+local COMBAT_STATE = {
+    IDLE = "IDLE",
+    TARGET_ACQUIRED = "TARGET_ACQUIRED",
+    ENGAGING = "ENGAGING",
+    TARGET_ELIMINATED = "TARGET_ELIMINATED",
+    TARGET_INVALID = "TARGET_INVALID",
+    TARGET_LOST = "TARGET_LOST",
+}
+local combatState = COMBAT_STATE.IDLE
+local combatTarget = nil
+local combatTargetUserId = nil
+local combatStartTimestamp = nil
+local lastCombatUpdate = nil
+local lastTargetHealth = nil
+local combatConnection = nil
+local AttackController = {
+    IsAvailable = false,
+    LastAttackTime = 0,
+    AttackCooldown = 0.08,
+    AttackRemote = nil,
+    HitRemote = nil,
+    AttackRange = 60,
+}
+local function initializeAttackRemotes()
+    local success, result = pcall(function()
+        local replicatedStorage = game:GetService("ReplicatedStorage")
+        local modules = replicatedStorage:FindFirstChild("Modules")
+        if not modules then
+            warn("[Combat] ERROR: Modules folder not found in ReplicatedStorage.")
+            return false
+        end
+        local net = modules:FindFirstChild("Net")
+        if not net then
+            warn("[Combat] ERROR: Net folder not found in Modules.")
+            return false
+        end
+        local reFolder = net:FindFirstChild("RE")
+        if not reFolder then
+            warn("[Combat] ERROR: RE folder not found in Net.")
+            return false
+        end
+        local attackRemote = reFolder:FindFirstChild("RegisterAttack")
+        if not attackRemote then
+            warn("[Combat] ERROR: RegisterAttack remote not found.")
+            return false
+        end
+        local hitRemote = reFolder:FindFirstChild("RegisterHit")
+        if not hitRemote then
+            warn("[Combat] ERROR: RegisterHit remote not found.")
+            return false
+        end
+        AttackController.AttackRemote = attackRemote
+        AttackController.HitRemote = hitRemote
+        AttackController.IsAvailable = true
+        print("[Combat] Fast Attack remotes found and initialized.")
+        return true
+    end)
+    if success then
+        return result
+    else
+        warn("[Combat] ERROR: Failed to initialize attack remotes:", result)
+        return false
+    end
+end
+local function getNearestEnemyPart()
+    local success, result = pcall(function()
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer then
+            return nil
+        end
+        local character = localPlayer.Character
+        if not character then
+            return nil
+        end
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then
+            return nil
+        end
+        local nearestPart = nil
+        local nearestDistance = AttackController.AttackRange
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") and obj.Parent then
+                local humanoid = obj.Parent:FindFirstChildOfClass("Humanoid")
+                if humanoid and obj.Parent ~= character then
+                    local distance = (rootPart.Position - obj.Position).Magnitude
+                    if distance < nearestDistance then
+                        nearestDistance = distance
+                        nearestPart = obj
+                    end
+                end
+            end
+        end
+        return nearestPart
+    end)
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+local function executeFastAttack()
+    local success, result = pcall(function()
+        if not AttackController.IsAvailable then
+            return false
+        end
+        local targetPart = getNearestEnemyPart()
+        if not targetPart then
+            return false
+        end
+        AttackController.AttackRemote:FireServer(0.5, 1)
+        task.wait(0.03)
+        AttackController.HitRemote:FireServer(targetPart, {}, nil, "14348cf8")
+        return true
+    end)
+    if success then
+        return result
+    else
+        return false
+    end
+end
+function AttackController.Attack(target)
+    local now = tick()
+    if now - AttackController.LastAttackTime < AttackController.AttackCooldown then
+        return false
+    end
+    AttackController.LastAttackTime = now
+    return executeFastAttack()
+end
+local function getTargetHumanoid(targetPlayer)
+    local success, result = pcall(function()
+        if not targetPlayer then
+            return nil
+        end
+        local character = targetPlayer.Character
+        if not character then
+            return nil
+        end
+        return character:FindFirstChildOfClass("Humanoid")
+    end)
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+local function getTargetHealth(targetPlayer)
+    local humanoid = getTargetHumanoid(targetPlayer)
+    if humanoid then
+        return humanoid.Health
+    end
+    return nil
+end
+local function isTargetAlive(targetPlayer)
+    local health = getTargetHealth(targetPlayer)
+    if health ~= nil then
+        return health > 0
+    end
+    return false
+end
+local function isCombatTargetValid()
+    if not combatTarget then
+        return false
+    end
+    local currentTarget = TargetManager.GetCurrentTarget()
+    if currentTarget ~= combatTarget then
+        return false
+    end
+    if not combatTarget.Parent then
+        return false
+    end
+    if not isCharacterValid(combatTarget) then
+        return false
+    end
+    if not isTargetAlive(combatTarget) then
+        return false
+    end
+    if not TargetManager.IsValidTarget(combatTarget) then
+        return false
+    end
+    return true
+end
+local function transitionCombatState(newState, reason)
+    if combatState == newState then
+        return
+    end
+    local oldState = combatState
+    combatState = newState
+    RuntimeData.CombatState = newState
+    if reason then
+        print("[Combat] State:", oldState, "→", newState, "(", reason, ")")
+    else
+        print("[Combat] State:", oldState, "→", newState)
+    end
+end
+local function stopCombat(reason)
+    if combatConnection then
+        combatConnection:Disconnect()
+        combatConnection = nil
+    end
+    combatTarget = nil
+    combatTargetUserId = nil
+    lastTargetHealth = nil
+    transitionCombatState(COMBAT_STATE.IDLE, reason)
+    RuntimeData.CombatTarget = nil
+    RuntimeData.CombatStartTimestamp = nil
+    RuntimeData.LastCombatUpdate = nil
+end
+local function detectElimination()
+    if not combatTarget then
+        return false
+    end
+    local currentHealth = getTargetHealth(combatTarget)
+    if currentHealth ~= nil and currentHealth <= 0 then
+        return true
+    end
+    if not combatTarget.Character then
+        if lastTargetHealth ~= nil and lastTargetHealth > 0 then
+            return true
+        end
+    end
+    return false
+end
+local function performCombatUpdate()
+    if not isCombatTargetValid() then
+        if combatTarget and not combatTarget.Parent then
+            transitionCombatState(COMBAT_STATE.TARGET_LOST, "Target left game")
+        elseif combatTarget and not isTargetAlive(combatTarget) then
+            transitionCombatState(COMBAT_STATE.TARGET_ELIMINATED, "Target eliminated")
+            RuntimeData.LastEliminationTimestamp = tick()
+        else
+            transitionCombatState(COMBAT_STATE.TARGET_INVALID, "Target became invalid")
+        end
+        stopCombat("Target invalid")
+        return
+    end
+    if detectElimination() then
+        transitionCombatState(COMBAT_STATE.TARGET_ELIMINATED, "Target eliminated")
+        RuntimeData.LastEliminationTimestamp = tick()
+        stopCombat("Target eliminated")
+        return
+    end
+    lastTargetHealth = getTargetHealth(combatTarget)
+    lastCombatUpdate = tick()
+    RuntimeData.LastCombatUpdate = lastCombatUpdate
+    AttackController.Attack(combatTarget)
+end
+local function startCombatLoop()
+    if not combatTarget then
+        return false
+    end
+    if combatConnection then
+        combatConnection:Disconnect()
+        combatConnection = nil
+    end
+    combatConnection = RunService.Heartbeat:Connect(function()
+        if combatState ~= COMBAT_STATE.ENGAGING then
+            return
+        end
+        pcall(function()
+            performCombatUpdate()
+        end)
+    end)
+    return true
+end
+function CombatManager.StartCombat(target)
+    if not target or not target:IsA("Player") then
+        warn("[Combat] ERROR: Cannot start combat with invalid target.")
+        return false
+    end
+    stopCombat("Starting new combat")
+    combatTarget = target
+    combatTargetUserId = target.UserId
+    combatStartTimestamp = tick()
+    lastTargetHealth = getTargetHealth(target)
+    RuntimeData.CombatTarget = {
+        Player = target,
+        UserId = target.UserId,
+        DisplayName = target.DisplayName,
+        Name = target.Name,
+    }
+    RuntimeData.CombatStartTimestamp = combatStartTimestamp
+    transitionCombatState(COMBAT_STATE.TARGET_ACQUIRED, "Target acquired")
+    local success = startCombatLoop()
+    if success then
+        transitionCombatState(COMBAT_STATE.ENGAGING, "Combat started")
+        print("[Combat] Combat started:", target.DisplayName or target.Name)
+    else
+        print("[Combat] Failed to start combat loop.")
+        stopCombat("Failed to start loop")
+    end
+    return success
+end
+function CombatManager.StopCombat(reason)
+    if combatState ~= COMBAT_STATE.IDLE then
+        print("[Combat] Combat stopped:", reason or "Unknown reason")
+    end
+    stopCombat(reason)
+end
+function CombatManager.IsInCombat()
+    return combatState == COMBAT_STATE.ENGAGING
+end
+function CombatManager.GetCombatState()
+    return combatState
+end
+function CombatManager.GetCurrentCombatTarget()
+    return combatTarget
+end
+function CombatManager.GetCombatTiming()
+    if not combatStartTimestamp then
+        return nil
+    end
+    local config = ConfigManager.GetConfig()
+    local noKillTimeout = config and config.AutoBounty.NoKillTimeout or 20
+    local currentTime = tick()
+    local duration = currentTime - combatStartTimestamp
+    local timeoutReached = duration >= noKillTimeout
+    return {
+        StartTime = combatStartTimestamp,
+        Duration = duration,
+        NoKillTimeout = noKillTimeout,
+        TimeoutReached = timeoutReached,
+        TargetStillAlive = combatTarget ~= nil and isTargetAlive(combatTarget),
+    }
+end
+function CombatManager.Update()
+    local currentTarget = TargetManager.GetCurrentTarget()
+    if currentTarget ~= combatTarget then
+        if combatState ~= COMBAT_STATE.IDLE then
+            if currentTarget then
+                print("[Combat] Target changed.")
+                stopCombat("Target changed")
+                CombatManager.StartCombat(currentTarget)
+            else
+                print("[Combat] Target cleared.")
+                stopCombat("Target cleared")
+            end
+        elseif currentTarget then
+            CombatManager.StartCombat(currentTarget)
+        end
+    end
+    if combatState == COMBAT_STATE.TARGET_ACQUIRED then
+        transitionCombatState(COMBAT_STATE.ENGAGING, "Combat loop ready")
+    end
+end
+function CombatManager.Initialize()
+    combatState = COMBAT_STATE.IDLE
+    combatTarget = nil
+    combatTargetUserId = nil
+    combatStartTimestamp = nil
+    lastCombatUpdate = nil
+    lastTargetHealth = nil
+    combatConnection = nil
+    RuntimeData.CombatState = COMBAT_STATE.IDLE
+    RuntimeData.CombatTarget = nil
+    RuntimeData.CombatStartTimestamp = nil
+    RuntimeData.LastCombatUpdate = nil
+    print("[Combat] CombatManager initialized.")
+    print("[Combat] Attack method: Fast Attack (RegisterAttack + RegisterHit)")
+    local remotesReady = initializeAttackRemotes()
+    if remotesReady then
+        print("[Combat] Fast Attack ready.")
+    else
+        warn("[Combat] WARNING: Fast Attack remotes not found. Combat may not work.")
+    end
+    return true
+end
+function CombatManager.Cleanup()
+    stopCombat("Cleanup")
+    combatState = COMBAT_STATE.IDLE
+    combatTarget = nil
+    combatTargetUserId = nil
+    combatStartTimestamp = nil
+    lastCombatUpdate = nil
+    lastTargetHealth = nil
+    combatConnection = nil
+    RuntimeData.CombatState = nil
+    RuntimeData.CombatTarget = nil
+    RuntimeData.CombatStartTimestamp = nil
+    RuntimeData.LastCombatUpdate = nil
+end
+local ServerManager = {
+    Name = "ServerManager",
+    Version = "1.0.0",
+}
+local HOP_STATE = {
+    IDLE = "IDLE",
+    REQUESTED = "REQUESTED",
+    DISCOVERING = "DISCOVERING",
+    SELECTING = "SELECTING",
+    TELEPORTING = "TELEPORTING",
+    WAITING_FOR_RESULT = "WAITING_FOR_RESULT",
+    SUCCESS = "SUCCESS",
+    FAILED = "FAILED",
+}
+local hopState = HOP_STATE.IDLE
+local hopReason = nil
+local hopRequestTimestamp = nil
+local lastHopTime = nil
+local currentPlaceId = PlaceId
+local currentJobId = game.JobId
+local discoveredServers = {}
+local lastDiscoveryTime = nil
+local DISCOVERY_COOLDOWN = 30
+local DISCOVERY_IN_PROGRESS = false
+local configuredRegion = nil
+local currentServerRegion = nil
+local REGION_ALIASES = {
+    ["hongkong"] = "Hong Kong",
+    ["hk"] = "Hong Kong",
+    ["hong"] = "Hong Kong",
+    ["hong kong"] = "Hong Kong",
+    ["singapore"] = "Singapore",
+    ["sg"] = "Singapore",
+    ["tokyo"] = "Tokyo",
+    ["jp"] = "Tokyo",
+    ["japan"] = "Tokyo",
+    ["sydney"] = "Sydney",
+    ["au"] = "Sydney",
+    ["australia"] = "Sydney",
+    ["oregon"] = "Oregon",
+    ["us-west"] = "Oregon",
+    ["uswest"] = "Oregon",
+    ["la"] = "Oregon",
+    ["losangeles"] = "Oregon",
+    ["virginia"] = "Virginia",
+    ["us-east"] = "Virginia",
+    ["useast"] = "Virginia",
+    ["us"] = "Virginia",
+    ["amsterdam"] = "Amsterdam",
+    ["eu"] = "Amsterdam",
+    ["europe"] = "Amsterdam",
+    ["germany"] = "Amsterdam",
+    ["france"] = "Amsterdam",
+    ["uk"] = "Amsterdam",
+    ["london"] = "Amsterdam",
+    ["mumbai"] = "Mumbai",
+    ["in"] = "Mumbai",
+    ["india"] = "Mumbai",
+    ["sau-paulo"] = "Sau Paulo",
+    ["br"] = "Sau Paulo",
+    ["brazil"] = "Sau Paulo",
+    ["saupaulo"] = "Sau Paulo",
+}
+local serverBrowserRemote = nil
+local function getNormalizedRegion(regionInput)
+    if not regionInput or type(regionInput) ~= "string" then
+        return nil
+    end
+    local lower = string.lower(regionInput)
+    return REGION_ALIASES[lower] or regionInput
+end
+local function initializeServerBrowser()
+    local success, result = pcall(function()
+        local replicatedStorage = game:GetService("ReplicatedStorage")
+        local browser = replicatedStorage:FindFirstChild("__ServerBrowser")
+        if browser then
+            serverBrowserRemote = browser
+            print("[Server] Server browser remote found.")
+            return true
+        end
+        for _, child in ipairs(replicatedStorage:GetDescendants()) do
+            if child.Name == "__ServerBrowser" and (child:IsA("RemoteEvent") or child:IsA("RemoteFunction")) then
+                serverBrowserRemote = child
+                print("[Server] Server browser remote found.")
+                return true
+            end
+        end
+        warn("[Server] WARNING: __ServerBrowser remote not found.")
+        return false
+    end)
+    if success then
+        return result
+    else
+        warn("[Server] ERROR: Failed to initialize server browser:", result)
+        return false
+    end
+end
+local function searchServersByRegion(region)
+    if not serverBrowserRemote then
+        warn("[Server] ERROR: Server browser not initialized.")
+        return {}
+    end
+    local success, result = pcall(function()
+        local servers = serverBrowserRemote:InvokeServer("Search", region)
+        if servers and type(servers) == "table" then
+            return servers
+        end
+        return {}
+    end)
+    if success then
+        return result or {}
+    else
+        warn("[Server] ERROR: Server browser search failed:", result)
+        return {}
+    end
+end
+local function getAvailableServersFromBrowser()
+    if not serverBrowserRemote then
+        return {}
+    end
+    local success, result = pcall(function()
+        local servers = serverBrowserRemote:InvokeServer()
+        if servers and type(servers) == "table" then
+            return servers
+        end
+        if configuredRegion then
+            servers = serverBrowserRemote:InvokeServer(configuredRegion)
+            if servers and type(servers) == "table" then
+                return servers
+            end
+        end
+        return {}
+    end)
+    if success then
+        return result or {}
+    else
+        return {}
+    end
+end
+local selectedServer = nil
+local failedServers = {}
+local MAX_FAILED_SERVERS = 10
+local visitedServers = {}
+local VISITED_CACHE_EXPIRY = 300
+local MAX_VISITED_CACHE = 50
+local teleportInProgress = false
+local teleportStartTime = nil
+local TELEPORT_TIMEOUT = 30
+local retryCount = 0
+local MAX_RETRIES = 3
+local RETRY_DELAY = 5
+local lastRetryTime = nil
+local hopRequestPending = false
+local lastUpdateTime = 0
+local UPDATE_COOLDOWN = 1
+local function getCurrentServerInfo()
+    return {
+        PlaceId = currentPlaceId,
+        JobId = currentJobId,
+    }
+end
+local function cleanVisitedCache()
+    local now = tick()
+    local cleaned = {}
+    for jobId, entry in pairs(visitedServers) do
+        if now - entry.timestamp < VISITED_CACHE_EXPIRY then
+            cleaned[jobId] = entry
+        end
+    end
+    visitedServers = cleaned
+end
+local function markServerVisited(jobId)
+    visitedServers[jobId] = {
+        timestamp = tick(),
+    }
+    local count = 0
+    for _ in pairs(visitedServers) do
+        count = count + 1
+    end
+    if count > MAX_VISITED_CACHE then
+        cleanVisitedCache()
+    end
+end
+local function isServerVisited(jobId)
+    local entry = visitedServers[jobId]
+    if not entry then
+        return false
+    end
+    local now = tick()
+    if now - entry.timestamp >= VISITED_CACHE_EXPIRY then
+        visitedServers[jobId] = nil
+        return false
+    end
+    return true
+end
+local function markServerFailed(jobId)
+    failedServers[jobId] = true
+    local count = 0
+    for _ in pairs(failedServers) do
+        count = count + 1
+    end
+    if count > MAX_FAILED_SERVERS then
+        failedServers = {}
+        failedServers[jobId] = true
+    end
+end
+local function isServerFailed(jobId)
+    return failedServers[jobId] == true
+end
+local function clearFailedServers()
+    failedServers = {}
+end
+local function transitionHopState(newState, reason)
+    if hopState == newState then
+        return
+    end
+    local oldState = hopState
+    hopState = newState
+    RuntimeData.ServerHopState = newState
+    if reason then
+        print("[Server] State:", oldState, "→", newState, "(", reason, ")")
+    else
+        print("[Server] State:", oldState, "→", newState)
+    end
+end
+local function resetHopState(reason)
+    hopState = HOP_STATE.IDLE
+    hopReason = nil
+    hopRequestTimestamp = nil
+    selectedServer = nil
+    teleportInProgress = false
+    teleportStartTime = nil
+    retryCount = 0
+    lastRetryTime = nil
+    hopRequestPending = false
+    discoveredServers = {}
+    lastDiscoveryTime = nil
+    DISCOVERY_IN_PROGRESS = false
+    RuntimeData.ServerHopState = HOP_STATE.IDLE
+    RuntimeData.ServerHopReason = nil
+    RuntimeData.ServerHopStartTime = nil
+    RuntimeData.SelectedServerId = nil
+    if reason then
+        print("[Server] Hop reset:", reason)
+    end
+end
+local function discoverServers()
+    if DISCOVERY_IN_PROGRESS then
+        return false
+    end
+    local now = tick()
+    if lastDiscoveryTime and (now - lastDiscoveryTime) < DISCOVERY_COOLDOWN then
+        return #discoveredServers > 0
+    end
+    DISCOVERY_IN_PROGRESS = true
+    transitionHopState(HOP_STATE.DISCOVERING, "Starting discovery")
+    print("[Server] Discovering servers...")
+    local allServers = {}
+    local nextPageCursor = nil
+    local pageCount = 0
+    local MAX_PAGES = 5
+    local success, result = pcall(function()
+        repeat
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?limit=100&sortOrder=Asc%s",
+                currentPlaceId,
+                nextPageCursor and ("&cursor=" .. nextPageCursor) or ""
+            )
+            local response = HttpService:GetAsync(url)
+            local data = HttpService:JSONDecode(response)
+            if data and data.data then
+                for _, server in ipairs(data.data) do
+                    table.insert(allServers, server)
+                end
+                nextPageCursor = data.nextPageCursor
+                pageCount = pageCount + 1
+            else
+                break
+            end
+        until not nextPageCursor or pageCount >= MAX_PAGES
+    end)
+    DISCOVERY_IN_PROGRESS = false
+    if success and #allServers > 0 then
+        discoveredServers = allServers
+        lastDiscoveryTime = tick()
+        print("[Server] Servers discovered:", #allServers)
+        return true
+    else
+        if not success then
+            warn("[Server] Server discovery failed:", result)
+        else
+            print("[Server] No servers discovered.")
+        end
+        return false
+    end
+end
+local function filterServers()
+    local candidates = {}
+    if configuredRegion and serverBrowserRemote then
+        local browserServers = getAvailableServersFromBrowser()
+        if #browserServers > 0 then
+            print("[Server] Got", #browserServers, "servers from browser for region:", configuredRegion)
+            for _, server in ipairs(browserServers) do
+                if server and server.id and server.id ~= currentJobId then
+                    if not isServerVisited(server.id) then
+                        if not isServerFailed(server.id) then
+                            local playing = server.playing or 0
+                            local maxPlayers = server.maxPlayers or 0
+                            if maxPlayers > 0 and playing < maxPlayers then
+                                table.insert(candidates, {
+                                    JobId = server.id,
+                                    Playing = playing,
+                                    MaxPlayers = maxPlayers,
+                                    AvailableSlots = maxPlayers - playing,
+                                    Ping = server.ping or 0,
+                                    RegionMatch = true,
+                                    RegionPriority = 100,
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+            table.sort(candidates, function(a, b)
+                return a.AvailableSlots > b.AvailableSlots
+            end)
+            return candidates
+        end
+    end
+    for _, server in ipairs(discoveredServers) do
+        if server and server.id and server.playing ~= nil and server.maxPlayers ~= nil then
+            local jobId = server.id
+            local playing = server.playing
+            local maxPlayers = server.maxPlayers
+            if jobId ~= currentJobId then
+                if not isServerVisited(jobId) then
+                    if not isServerFailed(jobId) then
+                        if playing < maxPlayers then
+                            table.insert(candidates, {
+                                JobId = jobId,
+                                Playing = playing,
+                                MaxPlayers = maxPlayers,
+                                AvailableSlots = maxPlayers - playing,
+                                Ping = server.ping or 0,
+                                RegionMatch = false,
+                                RegionPriority = 50,
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+    table.sort(candidates, function(a, b)
+        return a.AvailableSlots > b.AvailableSlots
+    end)
+    return candidates
+end
+local function selectServer()
+    transitionHopState(HOP_STATE.SELECTING, "Selecting server")
+    local candidates = filterServers()
+    if #candidates == 0 then
+        print("[Server] No valid server candidates found.")
+        return nil
+    end
+    local selected = candidates[1]
+    print("[Server] Server selected:", selected.JobId, "(", selected.Playing, "/", selected.MaxPlayers, ")")
+    return selected
+end
+local function initiateTeleport()
+    if not selectedServer then
+        return false
+    end
+    transitionHopState(HOP_STATE.TELEPORTING, "Initiating teleport")
+    print("[Server] Teleport initiated to:", selectedServer.JobId)
+    teleportInProgress = true
+    teleportStartTime = tick()
+    local success, result = pcall(function()
+        TeleportService:TeleportToPlaceInstance(currentPlaceId, selectedServer.JobId, Players.LocalPlayer)
+    end)
+    if success then
+        transitionHopState(HOP_STATE.WAITING_FOR_RESULT, "Teleport initiated")
+        return true
+    else
+        warn("[Server] Teleport initiation failed:", result)
+        markServerFailed(selectedServer.JobId)
+        teleportInProgress = false
+        teleportStartTime = nil
+        return false
+    end
+end
+local function checkHopConditions()
+    local targetCount = TargetManager.RefreshTargets()
+    if targetCount == 0 and not TargetManager.HasTarget() then
+        return true, "NoValidTargets"
+    end
+    local combatTiming = CombatManager.GetCombatTiming()
+    if combatTiming and combatTiming.TimeoutReached then
+        return true, "NoKillTimeout"
+    end
+    return false, nil
+end
+local function handleHopRequest(reason)
+    if hopState ~= HOP_STATE.IDLE then
+        return false
+    end
+    if hopRequestPending then
+        return false
+    end
+    hopRequestPending = true
+    hopReason = reason
+    hopRequestTimestamp = tick()
+    RuntimeData.ServerHopReason = reason
+    RuntimeData.ServerHopStartTime = hopRequestTimestamp
+    transitionHopState(HOP_STATE.REQUESTED, reason)
+    print("[Server] Hop requested. Reason:", reason)
+    return true
+end
+local function performUpdate()
+    local now = tick()
+    if now - lastUpdateTime < UPDATE_COOLDOWN then
+        return
+    end
+    lastUpdateTime = now
+    if hopState == HOP_STATE.IDLE then
+        local shouldHop, reason = checkHopConditions()
+        if shouldHop then
+            handleHopRequest(reason)
+        end
+    elseif hopState == HOP_STATE.REQUESTED then
+        local success = discoverServers()
+        if success then
+            local server = selectServer()
+            if server then
+                selectedServer = server
+                RuntimeData.SelectedServerId = server.JobId
+                initiateTeleport()
+            else
+                if retryCount < MAX_RETRIES then
+                    retryCount = retryCount + 1
+                    lastRetryTime = now
+                    transitionHopState(HOP_STATE.FAILED, "No candidates, retry " .. retryCount)
+                else
+                    resetHopState("Max retries reached")
+                end
+            end
+        else
+            if retryCount < MAX_RETRIES then
+                retryCount = retryCount + 1
+                lastRetryTime = now
+                transitionHopState(HOP_STATE.FAILED, "Discovery failed, retry " .. retryCount)
+            else
+                resetHopState("Max retries reached")
+            end
+        end
+    elseif hopState == HOP_STATE.DISCOVERING then
+        resetHopState("Unexpected discovering state")
+    elseif hopState == HOP_STATE.SELECTING then
+        resetHopState("Unexpected selecting state")
+    elseif hopState == HOP_STATE.TELEPORTING then
+        if teleportStartTime and (now - teleportStartTime) > TELEPORT_TIMEOUT then
+            warn("[Server] Teleport timeout.")
+            if selectedServer then
+                markServerFailed(selectedServer.JobId)
+            end
+            resetHopState("Teleport timeout")
+        end
+    elseif hopState == HOP_STATE.WAITING_FOR_RESULT then
+        if teleportStartTime and (now - teleportStartTime) > TELEPORT_TIMEOUT then
+            warn("[Server] Teleport timeout.")
+            if selectedServer then
+                markServerFailed(selectedServer.JobId)
+            end
+            resetHopState("Teleport timeout")
+        end
+    elseif hopState == HOP_STATE.FAILED then
+        if lastRetryTime and (now - lastRetryTime) >= RETRY_DELAY then
+            clearFailedServers()
+            transitionHopState(HOP_STATE.REQUESTED, "Retrying")
+        end
+    elseif hopState == HOP_STATE.SUCCESS then
+        resetHopState("Hop completed")
+    end
+end
+function ServerManager.RequestHop(reason)
+    if not reason or type(reason) ~= "string" then
+        warn("[Server] ERROR: Invalid hop reason.")
+        return false
+    end
+    if hopState ~= HOP_STATE.IDLE then
+        print("[Server] Hop already in progress. State:", hopState)
+        return false
+    end
+    return handleHopRequest(reason)
+end
+function ServerManager.ShouldHop()
+    local shouldHop, _ = checkHopConditions()
+    return shouldHop
+end
+function ServerManager.GetServerInfo()
+    return getCurrentServerInfo()
+end
+function ServerManager.GetJobId()
+    return currentJobId
+end
+function ServerManager.GetHopState()
+    return hopState
+end
+function ServerManager.GetHopReason()
+    return hopReason
+end
+function ServerManager.Update()
+    pcall(function()
+        performUpdate()
+    end)
+end
+function ServerManager.Initialize()
+    hopState = HOP_STATE.IDLE
+    hopReason = nil
+    hopRequestTimestamp = nil
+    lastHopTime = nil
+    discoveredServers = {}
+    lastDiscoveryTime = nil
+    DISCOVERY_IN_PROGRESS = false
+    selectedServer = nil
+    failedServers = {}
+    teleportInProgress = false
+    teleportStartTime = nil
+    retryCount = 0
+    lastRetryTime = nil
+    hopRequestPending = false
+    lastUpdateTime = 0
+    initializeServerBrowser()
+    local config = ConfigManager.GetConfig()
+    if config and config.Region then
+        configuredRegion = getNormalizedRegion(config.Region)
+        print("[Server] Region configured:", configuredRegion, "(from:", config.Region .. ")")
+        if serverBrowserRemote then
+            print("[Server] Will use Blox Fruits server browser for region:", configuredRegion)
+        else
+            print("[Server] Server browser not available, will use Roblox API fallback")
+        end
+    else
+        configuredRegion = nil
+        print("[Server] No region configured - will hop to any server")
+    end
+    RuntimeData.CurrentServerJobId = currentJobId
+    RuntimeData.ServerHopState = HOP_STATE.IDLE
+    RuntimeData.ServerHopReason = nil
+    RuntimeData.ServerHopStartTime = nil
+    RuntimeData.SelectedServerId = nil
+    RuntimeData.LastHopTime = nil
+    print("[Server] ServerManager initialized.")
+    print("[Server] Current JobId:", currentJobId)
+    return true
+end
+function ServerManager.Cleanup()
+    resetHopState("Cleanup")
+    discoveredServers = {}
+    lastDiscoveryTime = nil
+    DISCOVERY_IN_PROGRESS = false
+    selectedServer = nil
+    failedServers = {}
+    teleportInProgress = false
+    teleportStartTime = nil
+    RuntimeData.ServerHopState = nil
+    RuntimeData.ServerHopReason = nil
+    RuntimeData.ServerHopStartTime = nil
+    RuntimeData.SelectedServerId = nil
+end
+local Orchestrator = {
+    Name = "Orchestrator",
+    Version = "1.0.0",
+}
+local orchestratorActive = false
+local autoBountyEnabled = false
+local lastOrchestratorUpdate = 0
+local ORCHESTRATOR_UPDATE_COOLDOWN = 0.5
+local lastKnownState = "Disabled"
+local noTargetStartTime = nil
+local NO_TARGET_GRACE_PERIOD = 5
+local function isAutoBountyEnabled()
+    local config = ConfigManager.GetConfig()
+    if config and config.AutoBounty then
+        return config.AutoBounty.Enabled
+    end
+    return false
+end
+local function stopAllSystems()
+    if CombatManager.IsInCombat() then
+        CombatManager.StopCombat("AutoBounty disabled")
+    end
+    if MovementManager.IsMoving() then
+        MovementManager.Stop()
+    end
+    if TargetManager.HasTarget() then
+        TargetManager.ClearCurrentTarget()
+    end
+    StateManager.SetState("Disabled")
+    noTargetStartTime = nil
+end
+local function handleSearchingState()
+    local target = TargetManager.SelectTarget()
+    if target then
+        TargetManager.SetCurrentTarget(target)
+        StateManager.SetState("Targeting")
+        print("[Target] Target acquired:", target.DisplayName or target.Name)
+    else
+        local now = tick()
+        if not noTargetStartTime then
+            noTargetStartTime = now
+        end
+        if now - noTargetStartTime >= NO_TARGET_GRACE_PERIOD then
+            StateManager.SetState("NoTarget")
+            print("[Target] No valid targets found.")
+        end
+    end
+end
+local function handleTargetingState()
+    if not TargetManager.IsCurrentTargetValid() then
+        TargetManager.ClearCurrentTarget()
+        StateManager.SetState("Searching")
+        noTargetStartTime = nil
+        return
+    end
+    StateManager.SetState("Engaging")
+end
+local function handleEngagingState()
+    if not TargetManager.IsCurrentTargetValid() then
+        TargetManager.ClearCurrentTarget()
+        StateManager.SetState("Searching")
+        noTargetStartTime = nil
+        return
+    end
+    if not CombatManager.IsInCombat() then
+        local combatState = CombatManager.GetCombatState()
+        if combatState == "IDLE" then
+            local target = TargetManager.GetCurrentTarget()
+            if target then
+                CombatManager.StartCombat(target)
+            end
+        elseif combatState == "TARGET_ELIMINATED" then
+            print("[Combat] Target eliminated, searching for next target.")
+            TargetManager.ClearCurrentTarget()
+            StateManager.SetState("Searching")
+            noTargetStartTime = nil
+        end
+    end
+end
+local function handleNoTargetState()
+    local hopState = ServerManager.GetHopState()
+    if hopState == "IDLE" then
+        ServerManager.RequestHop("NoValidTargets")
+        StateManager.SetState("WaitingForHop")
+    end
+end
+local function handleWaitingForHopState()
+    local hopState = ServerManager.GetHopState()
+    if hopState == "IDLE" then
+        StateManager.SetState("Searching")
+        noTargetStartTime = nil
+    elseif hopState == "TELEPORTING" or hopState == "WAITING_FOR_RESULT" then
+        StateManager.SetState("Hopping")
+    end
+end
+local function handleHoppingState()
+    local hopState = ServerManager.GetHopState()
+    if hopState == "IDLE" then
+        StateManager.SetState("Searching")
+        noTargetStartTime = nil
+    end
+end
+local function performOrchestratorUpdate()
+    local now = tick()
+    if now - lastOrchestratorUpdate < ORCHESTRATOR_UPDATE_COOLDOWN then
+        return
+    end
+    lastOrchestratorUpdate = now
+    local currentEnabled = isAutoBountyEnabled()
+    if currentEnabled and not autoBountyEnabled then
+        autoBountyEnabled = true
+        StateManager.SetState("Searching")
+        print("[ByteCore] AutoBounty enabled.")
+    elseif not currentEnabled and autoBountyEnabled then
+        autoBountyEnabled = false
+        stopAllSystems()
+        print("[ByteCore] AutoBounty disabled.")
+        return
+    end
+    if not autoBountyEnabled then
+        return
+    end
+    local state = StateManager.GetState()
+    if state == "Searching" then
+        handleSearchingState()
+    elseif state == "Targeting" then
+        handleTargetingState()
+    elseif state == "Engaging" then
+        handleEngagingState()
+    elseif state == "NoTarget" then
+        handleNoTargetState()
+    elseif state == "WaitingForHop" then
+        handleWaitingForHopState()
+    elseif state == "Hopping" then
+        handleHoppingState()
+    end
+    lastKnownState = state
+end
+function Orchestrator.Initialize()
+    orchestratorActive = false
+    autoBountyEnabled = false
+    lastOrchestratorUpdate = 0
+    lastKnownState = "Disabled"
+    noTargetStartTime = nil
+    autoBountyEnabled = isAutoBountyEnabled()
+    print("[Orchestrator] Orchestrator initialized.")
+    if autoBountyEnabled then
+        print("[Orchestrator] AutoBounty: Enabled")
+    else
+        print("[Orchestrator] AutoBounty: Disabled")
+    end
+    return true
+end
+function Orchestrator.Update()
+    pcall(function()
+        performOrchestratorUpdate()
+    end)
+end
+function Orchestrator.Cleanup()
+    stopAllSystems()
+    orchestratorActive = false
+    autoBountyEnabled = false
+    lastOrchestratorUpdate = 0
+    lastKnownState = "Disabled"
+    noTargetStartTime = nil
+end
+local Modules = {
+    TargetManager = TargetManager,
+    CombatManager = CombatManager,
+    MovementManager = MovementManager,
+    ServerManager = ServerManager,
+    SafeZoneChecker = SafeZoneChecker,
+    PvPChecker = PvPChecker,
+    Orchestrator = Orchestrator,
+}
+local function initializeByteCore()
+    print("[ByteCore] Initializing...")
+    local configSuccess, configErr = ConfigManager.Initialize()
+    if not configSuccess then
+        warn("[ByteCore] Configuration validation failed. Initialization aborted.")
+        return false
+    end
+    print("[ByteCore] Normalized configuration created.")
+    print("[State] Initial state:", StateManager.GetState())
+    print("[ByteCore] Initializing module interfaces...")
+    for name, module in pairs(Modules) do
+        if module.Initialize then
+            local success = module.Initialize()
+            if not success then
+                warn("[ByteCore] WARNING: Module", name, "failed to initialize.")
+            end
+        end
+    end
+    local perfSuccess = PerformanceManager.Initialize()
+    if not perfSuccess then
+        warn("[ByteCore] WARNING: PerformanceManager initialization failed.")
+    end
+    local config = ConfigManager.GetConfig()
+    if config and config.AutoBounty then
+        RuntimeData.MovementMode = config.AutoBounty.MovementMode
+        RuntimeData.AutoBountyEnabled = config.AutoBounty.Enabled
+    end
+    print("[ByteCore] Phase 1-9 initialization complete.")
+    print("[ByteCore] Version: v2.0.0")
+    print("[ByteCore] Runtime data initialized.")
+    print("[ByteCore] Module system ready.")
+    print("[ByteCore] SafeZoneChecker: Active (real detection)")
+    print("[ByteCore] PvPChecker: Active (real detection)")
+    print("[ByteCore] MovementManager: Active")
+    print("[ByteCore] CombatManager: Active (real attack)")
+    print("[ByteCore] ServerManager: Active")
+    print("[ByteCore] Orchestrator: Active")
+    if config and config.SuperBoostFps then
+        print("[ByteCore] SuperBoostFps: ENABLED (FastFlags active)")
+    end
+    return true
+end
+local mainLoopConnection = nil
+local function startMainLoop()
+    if mainLoopConnection then
+        mainLoopConnection:Disconnect()
+        mainLoopConnection = nil
+    end
+    mainLoopConnection = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            Orchestrator.Update()
+        end)
+        pcall(function()
+            MovementManager.Update()
+        end)
+        pcall(function()
+            CombatManager.Update()
+        end)
+        pcall(function()
+            ServerManager.Update()
+        end)
+    end)
+end
+local function stopMainLoop()
+    if mainLoopConnection then
+        mainLoopConnection:Disconnect()
+        mainLoopConnection = nil
+    end
+end
+local function cleanup()
+    print("[ByteCore] Shutting down...")
+    stopMainLoop()
+    Orchestrator.Cleanup()
+    ServerManager.Cleanup()
+    CombatManager.Cleanup()
+    MovementManager.Cleanup()
+    TargetManager.Cleanup()
+    SafeZoneChecker.Cleanup()
+    PvPChecker.Cleanup()
+    PerformanceManager.Reset()
+    StateManager.Reset()
+    ConfigManager.Reset()
+    print("[ByteCore] Shutdown complete.")
+end
+if _G.ByteCoreCFG == nil then
+    warn("[ByteCore] ERROR: _G.ByteCoreCFG is not defined.")
+    warn("[ByteCore] Please define your configuration before loading ByteCore.")
+    warn([[
+        Example:
+        _G.ByteCoreCFG = {
+            ScriptKey = "Your Key",
+            Team = "Pirates",
+            Region = "hong",
+            DiscordID = "123456",
+            SuperBoostFps = false,
+            AutoBounty = {
+                Enabled = true,
+                InstantTP = true,
+                FollowTarget = false,
+                NoKillTimeout = 20,
+            },
+        }
+    ]])
+    return
+end
+if type(_G.ByteCoreCFG) ~= "table" then
+    warn("[ByteCore] ERROR: _G.ByteCoreCFG must be a table.")
+    return
+end
+local initSuccess = initializeByteCore()
+if initSuccess then
+    _G.ByteCore = {
+        ConfigManager = ConfigManager,
+        StateManager = StateManager,
+        PerformanceManager = PerformanceManager,
+        Modules = Modules,
+        RuntimeData = RuntimeData,
+        Cleanup = cleanup,
+    }
+    startMainLoop()
+    print("[ByteCore] Runtime initialized.")
+    print("[ByteCore] ByteCore Auto-Bounty v2.0.0 is ready.")
+else
+    warn("[ByteCore] Initialization failed. ByteCore will not be available.")
+end
