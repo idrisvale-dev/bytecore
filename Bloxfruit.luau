@@ -1,4 +1,4 @@
-Config = {
+uConfig = {
     Team = "Pirates",
     Configuration = {
         HopWhenIdle = true,
