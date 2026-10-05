@@ -2896,7 +2896,7 @@ end
 function Logger.decompile(scr) if decompile then return decompile(scr) end; if getscriptbytecode then return getscriptbytecode(scr) end; return nil end
 function Logger.scan_gc()
     if not getgc then return {} end
-    local counts={function=0,table=0,userdata=0,thread=0,["?"]=0}
+    local counts={["function"]=0,table=0,userdata=0,thread=0,["?"]=0}
     local ok,gc=pcall(getgc); if not ok or not gc then return counts end
     for _,obj in ipairs(gc) do local t=typeof(obj); counts[t]=(counts[t] or 0)+1 end
     return counts
