@@ -301,10 +301,10 @@ function Library:CreateWindow(config)
     local old = PlayerGui:FindFirstChild(config.Name or "BytecoreUI")
     if old then old:Destroy() end
     local gui = make("ScreenGui", { Name = config.Name or "BytecoreUI", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = config.DisplayOrder or 999 }, PlayerGui)
-    local root = make("Frame", { Size = UDim2.fromScale(0.92, 0.78), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COLORS.Background, BorderSizePixel = 0 }, gui)
+    local root = make("Frame", { Size = UDim2.fromScale(0.86, 0.72), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COLORS.Background, BorderSizePixel = 0 }, gui)
     corner(root, 14); stroke(root, COLORS.Border, 0.15)
     liquid(root, Color3.fromRGB(24, 28, 38), COLORS.Background, 28)
-    make("UISizeConstraint", { MinSize = Vector2.new(300, 250), MaxSize = Vector2.new(config.Width or 720, config.Height or 470) }, root)
+    make("UISizeConstraint", { MinSize = Vector2.new(300, 250), MaxSize = Vector2.new(config.Width or 640, config.Height or 420) }, root)
     local header = make("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1 }, root)
     local title = label(header, config.Title or "Bytecore", 16, COLORS.Text, Enum.Font.GothamBold); title.Position = UDim2.fromOffset(16, 8); title.Size = UDim2.new(1, -132, 0, 20); title.TextTruncate = Enum.TextTruncate.AtEnd
     local subtitle = label(header, config.Subtitle or "Minimal interface", 10, COLORS.Muted); subtitle.Position = UDim2.fromOffset(17, 28); subtitle.Size = UDim2.new(1, -132, 0, 14); subtitle.TextTruncate = Enum.TextTruncate.AtEnd
