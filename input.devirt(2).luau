@@ -6387,6 +6387,7 @@ index2.Restore = function(arg)
 	local unit = n5.Magnitude > 1 and n5.Unit or Vector2.new(1, 0)
 	tbl5.tween(arg.DockState, 0.35, { Size = UDim2.fromOffset(10, 10) }, Enum.EasingStyle.Back)
 	local v10, v11 = arg:Merge(unit, false)
+	v10 = typeof(v10) == "Vector2" and v10 or v9
 	holder.Size = UDim2.fromOffset(orb, orb)
 	holder.Position = UDim2.fromOffset(v10.X, v10.Y)
 	arg.Round.CornerRadius = UDim.new(0, orb / 2)
