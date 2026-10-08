@@ -1,5 +1,5 @@
 local Library = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/idrisvale-dev/bytecore/2ee3132/BytecoreLibrary.luau"
+    "https://raw.githubusercontent.com/idrisvale-dev/bytecore/77ff218/BytecoreLibrary.luau"
 ))()
 
 local Window = Library:CreateWindow({
