@@ -14214,7 +14214,14 @@ Restock: %s
 	fn27("CoreSetup")
 	fn27("CombatHooks")
 	fn27("RuntimeServices")
-	task.spawn(fn27, "LoadLibrary")
+	task.spawn(function()
+		local ok, err = pcall(function()
+			fn27("LoadLibrary")
+		end)
+		if not ok then
+			warn("[Quantum Onyx] NightHub LoadLibrary failed: " .. tostring(err))
+		end
+	end)
 
 	task.spawn(function()
 		task.wait(1.5)
