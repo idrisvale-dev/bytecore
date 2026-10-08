@@ -312,7 +312,7 @@ if not RunService then
 
 	local lua = fn5("Util/BloxFruitModule/Preload/Data.lua") or {}
 	local lua2 = fn5("Util/BloxFruitModule/Preload/Visuals.lua") or {}
-	local lua3 = fn5("dev/testers.lua")
+	local lua3 = nil -- legacy Quantum UI module disabled; NightHub is the only UI backend
 	local materialEnemies = lua.MaterialEnemies
 	local quests = lua.QUESTS
 	local bossList = lua.BossList
@@ -3240,7 +3240,7 @@ Restock: %s
 		return nil
 	end
 
-	local lua4 = lua3 or fn5("dev/testers.lua")
+	local lua4 = nil -- legacy Quantum UI disabled; assigned to NightHubAdapter before UI creation
 
 	tbl6.SendNotify = function(arg, arg2, arg3, arg4, arg5, arg6)
 		pcall(function()
@@ -5975,6 +5975,9 @@ Restock: %s
 				return tabProxy
 			end
 			function old:Notify(data) return Library:Notify(data) end
+			old.Notification = { Notify = function(_, data, options)
+				return old:Notify({ Title=data and data.Title or "Quantum Onyx", Content=data and data.Description or "", Duration=options and options.Time or 5 })
+			end }
 			function old:Destroy() return Library:Destroy() end
 			return old
 		end
@@ -5982,9 +5985,7 @@ Restock: %s
 	end)()
 
 	tbl6.LoadLibrary = function()
-		if not lua4 or not lua4.CreateWindow then
-			lua4 = NightHubAdapter
-		end
+		lua4 = NightHubAdapter
 
 		if not lua4 or not lua4.CreateWindow then
 			warn("[Quantum ERROR] Critical: UI Library failed to load!")
