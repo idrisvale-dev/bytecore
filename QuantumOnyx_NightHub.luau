@@ -14246,7 +14246,7 @@ Restock: %s
 		tbl6:SendNotify("Quantum (INFO)", "DevAurora Code -  https://discord.gg/9dAFZsxKPc", 8)
 
 		pcall(function()
-			-- External WeeboDevAurora loader removed; NightHub is the sole UI dependency.
+			-- Legacy external UI loader removed; NightHub is the sole UI dependency.
 		end)
 	end)
 
