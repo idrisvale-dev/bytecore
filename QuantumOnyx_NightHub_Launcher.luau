@@ -1,7 +1,7 @@
 -- Quantum Onyx + NightHub visible startup launcher
 -- Static-authored wrapper; do not execute in the sandbox.
 local NIGHT_URL = "https://raw.githubusercontent.com/idrisvale-dev/bytecore/6f96387a55d31f431728d2e8696a1bcd9e896f87/NightHub_v15_reconstructed13.luau"
-local QUANTUM_URL = "https://raw.githubusercontent.com/idrisvale-dev/bytecore/f76a702d185a78c354e2d1507a33fd78873d5a1d/QuantumOnyx_NightHub.luau"
+local QUANTUM_URL = "https://raw.githubusercontent.com/idrisvale-dev/bytecore/26d337ff6db91d4d21ef1aac8deb1abee2e83ec4/QuantumOnyx_NightHub.luau"
 
 local function loadRemote(url)
     local source = game:HttpGet(url)
