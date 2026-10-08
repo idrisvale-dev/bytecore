@@ -26,8 +26,8 @@ local COLORS = {
     SurfaceHover = Color3.fromRGB(38, 44, 56),
     Text = Color3.fromRGB(235, 239, 247),
     Muted = Color3.fromRGB(145, 154, 171),
-    Accent = Color3.fromRGB(92, 166, 255),
-    Accent2 = Color3.fromRGB(53, 118, 212),
+    Accent = Color3.fromRGB(245, 74, 91),
+    Accent2 = Color3.fromRGB(177, 42, 61),
     Good = Color3.fromRGB(83, 205, 139),
     Bad = Color3.fromRGB(240, 103, 111),
     Warn = Color3.fromRGB(245, 185, 92),
@@ -62,6 +62,14 @@ local function stroke(parent, color, transparency)
     return s
 end
 
+local function liquid(parent, first, second, rotation)
+    local g = Instance.new("UIGradient")
+    g.Color = ColorSequence.new(first or COLORS.Panel2, second or COLORS.Panel)
+    g.Rotation = rotation or 28
+    g.Parent = parent
+    return g
+end
+
 local function label(parent, text, size, color, font)
     local l = Instance.new("TextLabel")
     l.BackgroundTransparency = 1
@@ -86,6 +94,7 @@ local function button(parent, text)
     b.Font = Enum.Font.GothamMedium
     b.Parent = parent
     corner(b, 7)
+    liquid(b, COLORS.SurfaceHover, COLORS.Surface, 35)
     connect(Library, b.MouseEnter, function() tween(b, 0.14, { BackgroundColor3 = COLORS.SurfaceHover }) end)
     connect(Library, b.MouseLeave, function() tween(b, 0.14, { BackgroundColor3 = COLORS.Surface }) end)
     return b
@@ -173,15 +182,15 @@ function Library:_newSection(tab, titleText)
         config = config or {}
         local row = self.Window.Library:_makeRow(self.Content, config.Title or "Toggle", config.Description)
         local track = button(row, "")
-        track.Size = UDim2.fromOffset(42, 24); track.Position = UDim2.new(1, -54, 0.5, -12)
-        track.BackgroundColor3 = config.Default and COLORS.Accent2 or COLORS.Surface
+        track.Size = UDim2.fromOffset(42, 24); track.Position = UDim2.new(1, -54, 0.5, -12); track.ClipsDescendants = true
+        track.BackgroundColor3 = config.Default and COLORS.Accent or COLORS.Surface
         local knob = make("Frame", { Size = UDim2.fromOffset(18, 18), Position = config.Default and UDim2.fromOffset(21, 3) or UDim2.fromOffset(3, 3), BackgroundColor3 = COLORS.Text, BorderSizePixel = 0 }, track)
         corner(knob, 9)
         local state = config.Default == true
         local api = {}
         local function set(value, fire)
             state = value == true
-            tween(track, 0.16, { BackgroundColor3 = state and COLORS.Accent2 or COLORS.Surface })
+            tween(track, 0.16, { BackgroundColor3 = state and COLORS.Accent or COLORS.Surface })
             tween(knob, 0.16, { Position = state and UDim2.fromOffset(21, 3) or UDim2.fromOffset(3, 3) })
             if fire then safeCallback(config.Callback, state) end
         end
@@ -195,10 +204,11 @@ function Library:_newSection(tab, titleText)
         local row = self.Window.Library:_makeRow(self.Content, config.Title or "Slider", config.Description)
         local min, max = config.Min or 0, config.Max or 100
         local value = math.clamp(config.Default or min, min, max)
-        local track = make("Frame", { Size = UDim2.fromOffset(120, 5), Position = UDim2.new(1, -132, 0.5, -2), BackgroundColor3 = COLORS.Surface, BorderSizePixel = 0 }, row)
+        local track = make("Frame", { Size = UDim2.fromOffset(120, 6), Position = UDim2.new(1, -132, 0.5, -3), BackgroundColor3 = COLORS.Surface, BorderSizePixel = 0, Active = true }, row)
         corner(track, 3)
         local fill = make("Frame", { Size = UDim2.new((value - min) / (max - min), 0, 1, 0), BackgroundColor3 = COLORS.Accent, BorderSizePixel = 0 }, track)
         corner(fill, 3)
+        liquid(fill, Color3.fromRGB(255, 109, 122), COLORS.Accent2, 0)
         local knob = make("TextButton", { Size = UDim2.fromOffset(16, 16), Position = UDim2.new((value - min) / (max - min), -8, 0.5, -8), BackgroundColor3 = COLORS.Text, Text = "", BorderSizePixel = 0, AutoButtonColor = false }, track)
         corner(knob, 8)
         local api = {}
@@ -234,12 +244,15 @@ function Library:_newSection(tab, titleText)
         config = config or {}
         local values = config.Values or config.Options or {}
         local row = self.Window.Library:_makeRow(self.Content, config.Title or "Dropdown", config.Description)
+        row.ZIndex = 20; row.ClipsDescendants = false
         local selected = config.Default or values[1]
         local trigger = button(row, tostring(selected or "Select"))
-        trigger.Size = UDim2.fromOffset(132, 30); trigger.Position = UDim2.new(1, -144, 0.5, -15)
+        trigger.Size = UDim2.fromOffset(132, 30); trigger.Position = UDim2.new(1, -144, 0.5, -15); trigger.ZIndex = 21
         trigger.TextTruncate = Enum.TextTruncate.AtEnd
-        local menu = make("Frame", { Visible = false, ZIndex = 50, Size = UDim2.fromOffset(132, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = COLORS.Panel2, BorderSizePixel = 0 }, row)
+        liquid(trigger, COLORS.SurfaceHover, COLORS.Surface, 0)
+        local menu = make("Frame", { Visible = false, ZIndex = 50, Size = UDim2.fromOffset(132, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = COLORS.Panel2, BorderSizePixel = 0, Active = true }, row)
         menu.Position = UDim2.new(1, -144, 1, 3); corner(menu, 7); stroke(menu, COLORS.Border, 0.1)
+        liquid(menu, COLORS.Panel2, COLORS.Background, 20)
         local list = make("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, menu)
         local api = { Value = selected, Values = values }
         local function rebuild()
@@ -290,6 +303,7 @@ function Library:CreateWindow(config)
     local gui = make("ScreenGui", { Name = config.Name or "BytecoreUI", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = config.DisplayOrder or 999 }, PlayerGui)
     local root = make("Frame", { Size = UDim2.fromScale(0.92, 0.78), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COLORS.Background, BorderSizePixel = 0 }, gui)
     corner(root, 14); stroke(root, COLORS.Border, 0.15)
+    liquid(root, Color3.fromRGB(24, 28, 38), COLORS.Background, 28)
     make("UISizeConstraint", { MinSize = Vector2.new(300, 250), MaxSize = Vector2.new(config.Width or 720, config.Height or 470) }, root)
     local header = make("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1 }, root)
     local title = label(header, config.Title or "Bytecore", 16, COLORS.Text, Enum.Font.GothamBold); title.Position = UDim2.fromOffset(16, 8); title.Size = UDim2.new(1, -132, 0, 20); title.TextTruncate = Enum.TextTruncate.AtEnd
@@ -300,7 +314,7 @@ function Library:CreateWindow(config)
     local nav = make("Frame", { Size = UDim2.fromOffset(108, 1), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, body)
     make("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, nav)
     local content = make("Frame", { Position = UDim2.fromOffset(118, 0), Size = UDim2.new(1, -118, 1, 0), BackgroundColor3 = COLORS.Panel, BorderSizePixel = 0 }, body)
-    corner(content, 10); stroke(content, COLORS.Border, 0.35)
+    corner(content, 10); stroke(content, COLORS.Border, 0.35); liquid(content, Color3.fromRGB(27, 32, 43), COLORS.Panel, 24)
     local tabs = {}
     local window = { Library = self, GUI = gui, Root = root, Nav = nav, Content = content, Tabs = tabs, CurrentTab = 0, Connections = {}, Minimized = false, AnimationsEnabled = true }
     window.__index = window
