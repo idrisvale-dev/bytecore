@@ -208,21 +208,63 @@ function Library:_newSection(tab, titleText)
             fill.Size = UDim2.new(alpha, 0, 1, 0); knob.Position = UDim2.new(alpha, -8, 0.5, -8)
             if fire then safeCallback(config.Callback, value) end
         end
-        connect(self.Window, knob.InputBegan, function(input)
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            local move
-            move = connect(self.Window, UserInputService.InputChanged, function(changed)
-                if changed.UserInputType == Enum.UserInputType.MouseMovement or changed.UserInputType == Enum.UserInputType.Touch then
-                    local alpha = math.clamp((changed.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-                    set(min + (max - min) * alpha, true)
-                end
-            end)
-            local ended; ended = connect(self.Window, UserInputService.InputEnded, function(endedInput)
-                if endedInput.UserInputType == input.UserInputType then move:Disconnect(); ended:Disconnect() end
-            end)
+        local dragging = false
+        local function updateFromX(x)
+            local alpha = math.clamp((x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
+            set(min + (max - min) * alpha, true)
+        end
+        connect(self.Window, track.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true; updateFromX(input.Position.X)
+            end
+        end)
+        connect(self.Window, UserInputService.InputChanged, function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                updateFromX(input.Position.X)
+            end
+        end)
+        connect(self.Window, UserInputService.InputEnded, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
         end)
         api.SetValue = function(_, v) set(v, true) end
         api.GetValue = function() return value end
+        return api
+    end
+    function section:AddDropdown(config)
+        config = config or {}
+        local values = config.Values or config.Options or {}
+        local row = self.Window.Library:_makeRow(self.Content, config.Title or "Dropdown", config.Description)
+        local selected = config.Default or values[1]
+        local trigger = button(row, tostring(selected or "Select"))
+        trigger.Size = UDim2.fromOffset(132, 30); trigger.Position = UDim2.new(1, -144, 0.5, -15)
+        trigger.TextTruncate = Enum.TextTruncate.AtEnd
+        local menu = make("Frame", { Visible = false, ZIndex = 50, Size = UDim2.fromOffset(132, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = COLORS.Panel2, BorderSizePixel = 0 }, row)
+        menu.Position = UDim2.new(1, -144, 1, 3); corner(menu, 7); stroke(menu, COLORS.Border, 0.1)
+        local list = make("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, menu)
+        local api = { Value = selected, Values = values }
+        local function rebuild()
+            for _, child in ipairs(menu:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+            for index, value in ipairs(api.Values) do
+                local option = button(menu, tostring(value)); option.Size = UDim2.new(1, -8, 0, 28); option.Position = UDim2.fromOffset(4, 0); option.LayoutOrder = index; option.ZIndex = 51
+                connect(self.Window, option.Activated, function()
+                    api.Value = value; trigger.Text = tostring(value); menu.Visible = false; safeCallback(config.Callback, value)
+                end)
+            end
+        end
+        function api:SetValue(value)
+            if table.find(api.Values, value) then api.Value = value; trigger.Text = tostring(value); safeCallback(config.Callback, value) end
+        end
+        function api:SetValues(newValues)
+            api.Values = newValues or {}; api.Value = api.Values[1]; trigger.Text = tostring(api.Value or "Select"); rebuild()
+        end
+        connect(self.Window, trigger.Activated, function() menu.Visible = not menu.Visible end)
+        connect(self.Window, UserInputService.InputBegan, function(input)
+            if menu.Visible and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                local p, s = menu.AbsolutePosition, menu.AbsoluteSize
+                if input.Position.X < p.X or input.Position.X > p.X + s.X or input.Position.Y < p.Y or input.Position.Y > p.Y + s.Y then menu.Visible = false end
+            end
+        end)
+        rebuild()
         return api
     end
     function section:AddLabel(text)
@@ -246,20 +288,21 @@ function Library:CreateWindow(config)
     local old = PlayerGui:FindFirstChild(config.Name or "BytecoreUI")
     if old then old:Destroy() end
     local gui = make("ScreenGui", { Name = config.Name or "BytecoreUI", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = config.DisplayOrder or 999 }, PlayerGui)
-    local root = make("Frame", { Size = UDim2.fromOffset(720, 470), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COLORS.Background, BorderSizePixel = 0 }, gui)
+    local root = make("Frame", { Size = UDim2.fromScale(0.92, 0.78), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COLORS.Background, BorderSizePixel = 0 }, gui)
     corner(root, 14); stroke(root, COLORS.Border, 0.15)
-    local scale = make("UIScale", { Scale = 1 }, root)
-    local header = make("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1 }, root)
-    local title = label(header, config.Title or "Bytecore", 17, COLORS.Text, Enum.Font.GothamBold); title.Position = UDim2.fromOffset(22, 11); title.Size = UDim2.new(1, -180, 0, 22)
-    local subtitle = label(header, config.Subtitle or "Minimal interface", 11, COLORS.Muted); subtitle.Position = UDim2.fromOffset(23, 33); subtitle.Size = UDim2.new(1, -180, 0, 16)
-    local close = button(header, "×"); close.Size = UDim2.fromOffset(30, 30); close.Position = UDim2.new(1, -42, 0, 14); close.TextSize = 20
-    local body = make("Frame", { Position = UDim2.fromOffset(14, 66), Size = UDim2.new(1, -28, 1, -80), BackgroundTransparency = 1 }, root)
-    local nav = make("Frame", { Size = UDim2.fromOffset(142, 1), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, body)
-    make("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, nav)
-    local content = make("Frame", { Position = UDim2.fromOffset(158, 0), Size = UDim2.new(1, -158, 1, 0), BackgroundColor3 = COLORS.Panel, BorderSizePixel = 0 }, body)
+    make("UISizeConstraint", { MinSize = Vector2.new(300, 250), MaxSize = Vector2.new(config.Width or 720, config.Height or 470) }, root)
+    local header = make("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1 }, root)
+    local title = label(header, config.Title or "Bytecore", 16, COLORS.Text, Enum.Font.GothamBold); title.Position = UDim2.fromOffset(16, 8); title.Size = UDim2.new(1, -132, 0, 20); title.TextTruncate = Enum.TextTruncate.AtEnd
+    local subtitle = label(header, config.Subtitle or "Minimal interface", 10, COLORS.Muted); subtitle.Position = UDim2.fromOffset(17, 28); subtitle.Size = UDim2.new(1, -132, 0, 14); subtitle.TextTruncate = Enum.TextTruncate.AtEnd
+    local minimize = button(header, "—"); minimize.Size = UDim2.fromOffset(30, 28); minimize.Position = UDim2.new(1, -76, 0, 12); minimize.TextSize = 18
+    local close = button(header, "×"); close.Size = UDim2.fromOffset(30, 28); close.Position = UDim2.new(1, -40, 0, 12); close.TextSize = 19
+    local body = make("Frame", { Position = UDim2.fromOffset(10, 60), Size = UDim2.new(1, -20, 1, -70), BackgroundTransparency = 1 }, root)
+    local nav = make("Frame", { Size = UDim2.fromOffset(108, 1), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1 }, body)
+    make("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, nav)
+    local content = make("Frame", { Position = UDim2.fromOffset(118, 0), Size = UDim2.new(1, -118, 1, 0), BackgroundColor3 = COLORS.Panel, BorderSizePixel = 0 }, body)
     corner(content, 10); stroke(content, COLORS.Border, 0.35)
     local tabs = {}
-    local window = { Library = self, GUI = gui, Root = root, Nav = nav, Content = content, Tabs = tabs, CurrentTab = 0, Connections = {} }
+    local window = { Library = self, GUI = gui, Root = root, Nav = nav, Content = content, Tabs = tabs, CurrentTab = 0, Connections = {}, Minimized = false, AnimationsEnabled = true }
     window.__index = window
     setmetatable(window, window)
     function window:SelectTab(index)
@@ -288,6 +331,25 @@ function Library:CreateWindow(config)
         if self.GUI then self.GUI:Destroy() end
         self.Library.Windows[self] = nil
     end
+    function window:SetAnimationsEnabled(enabled)
+        self.AnimationsEnabled = enabled ~= false
+        return self.AnimationsEnabled
+    end
+    function window:FixAnimations()
+        self.AnimationsEnabled = true
+        self.Library:Notify({ Title = "Animations", Content = "Smooth animation mode enabled.", Color = COLORS.Good, Duration = 2 })
+    end
+    local normalSize = root.Size
+    local function setMinimized(value)
+        window.Minimized = value
+        if value then
+            body.Visible = false
+            tween(root, 0.24, { Size = UDim2.new(0.6, 0, 0, 52) })
+        else
+            tween(root, 0.24, { Size = normalSize }).Completed:Connect(function() body.Visible = true end)
+        end
+    end
+    connect(self, minimize.Activated, function() setMinimized(not window.Minimized) end)
     connect(self, close.Activated, function() window:Destroy() end)
     local dragging, dragStart, startPos
     connect(self, header.InputBegan, function(input)
@@ -310,7 +372,7 @@ function Library:CreateWindow(config)
     self.ActiveWindow = window
     self.Windows[window] = true
     window:SelectTab(1)
-    tween(root, 0.35, { Size = UDim2.fromOffset(config.Width or 720, config.Height or 470) })
+    tween(root, 0.35, { BackgroundTransparency = 0 })
     return window
 end
 

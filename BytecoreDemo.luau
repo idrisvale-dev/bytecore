@@ -39,6 +39,23 @@ Controls:AddSlider({
         print("Example slider:", value)
     end,
 })
+Controls:AddDropdown({
+    Title = "Example dropdown",
+    Description = "Touch-friendly selection menu.",
+    Values = { "Low", "Medium", "High" },
+    Default = "Medium",
+    Callback = function(value)
+        print("Example dropdown:", value)
+    end,
+})
+Controls:AddButton({
+    Title = "Animation fix",
+    Description = "Re-enable smooth UI animation mode.",
+    Label = "Fix",
+    Callback = function()
+        Window:FixAnimations()
+    end,
+})
 
 local Console = Window:AddTab({ Title = "Console" })
 local ConsoleSection = Console:AddSection("Capture")

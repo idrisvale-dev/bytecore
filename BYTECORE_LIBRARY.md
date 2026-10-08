@@ -35,12 +35,17 @@ Section:AddButton({
 ## Included
 
 - Smooth draggable window
+- Responsive mobile-first sizing with minimum/maximum bounds
+- Minimize and close controls
+- Touch-friendly dragging and sliders
 - Tab navigation
 - Sections and labels
 - Buttons
 - Toggles
 - Sliders
+- Dropdowns
 - Notifications
+- Animation reset/fix method
 - Optional `LogService.MessageOut` capture
 - Optional executor workspace text logging
 - Safe callback isolation with `xpcall`
