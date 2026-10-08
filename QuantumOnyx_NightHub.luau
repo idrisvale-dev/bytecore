@@ -5919,22 +5919,34 @@ Restock: %s
 
 		local function sectionProxy(section)
 			local proxy = {}
+			local function safe(method, config)
+				local ok, control = pcall(function()
+					local fn = section and section[method]
+					if type(fn) ~= "function" then error("NightHub section method missing: " .. method) end
+					return fn(section, config)
+				end)
+				if not ok then
+					warn("[Quantum Onyx] skipped " .. method .. ": " .. tostring(control))
+					return {}
+				end
+				return controlProxy(control)
+			end
 			function proxy:addMenu(title) return proxy end
 			function proxy:addSection() return proxy end
 			function proxy:addToggle(title, default, callback, locked, description)
-				return controlProxy(section:AddToggle({Title=title, Default=default, Callback=callback, Locked=locked, Description=description}))
+				return safe("AddToggle", {Title=title, Default=default, Callback=callback, Locked=locked, Description=description})
 			end
 			function proxy:addDropdown(title, default, values, callback, locked, multi)
-				return controlProxy(section:AddDropdown({Title=title, Default=default, Values=values or {}, Callback=callback, Locked=locked, Multi=multi}))
+				return safe("AddDropdown", {Title=title, Default=default, Values=values or {}, Callback=callback, Locked=locked, Multi=multi})
 			end
 			function proxy:addSlider(title, min, max, default, callback, locked, step)
-				return controlProxy(section:AddSlider({Title=title, Min=min, Max=max, Default=default, Callback=callback, Locked=locked, Step=step}))
+				return safe("AddSlider", {Title=title, Min=min, Max=max, Default=default, Callback=callback, Locked=locked, Step=step})
 			end
 			function proxy:addTextbox(title, callback, confirmText)
-				return controlProxy(section:AddTextbox({Title=title, Callback=callback, ConfirmText=confirmText}))
+				return safe("AddTextbox", {Title=title, Callback=callback, ConfirmText=confirmText})
 			end
 			function proxy:addButton(title, callback)
-				return controlProxy(section:AddButton({Title=title, Label="Run", Callback=callback}))
+				return safe("AddButton", {Title=title, Label="Run", Callback=callback})
 			end
 			function proxy:addButtonGrid(title, buttons)
 				for _, item in ipairs(buttons or {}) do
@@ -5943,7 +5955,10 @@ Restock: %s
 				return proxy
 			end
 			function proxy:addParagraph(title, description)
-				return controlProxy(section:AddParagraph({Title=title, Description=description}))
+				return safe("AddParagraph", {Title=title, Description=description})
+			end
+			function proxy:addLabel(title, description)
+				return safe("AddParagraph", {Title=title, Description=description})
 			end
 			return proxy
 		end
