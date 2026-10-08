@@ -1039,12 +1039,22 @@ local tbl6
 tbl6 = {
 	jobs = {},
 	loop = nil,
-	quick = TweenInfo.new(0.2, Enum.EasingStyle.Quint),
-	smooth = TweenInfo.new(0.35, Enum.EasingStyle.Quint),
-	springy = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-	tick = function()
-		error("devirt: symbolic generic for (at 0:3)")
-	end,
+		quick = TweenInfo.new(0.2, Enum.EasingStyle.Quint),
+		smooth = TweenInfo.new(0.35, Enum.EasingStyle.Quint),
+		springy = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		tick = function(dt)
+			dt = math.min(tonumber(dt) or (1 / 60), 0.1)
+			for job in pairs(tbl6.jobs) do
+				local ok, done = pcall(job, dt)
+				if not ok or done then
+					tbl6.jobs[job] = nil
+				end
+			end
+			if next(tbl6.jobs) == nil and tbl6.loop then
+				tbl6.loop:Disconnect()
+				tbl6.loop = nil
+			end
+		end,
 	run = function(arg)
 		tbl6.jobs[arg] = true
 
@@ -6352,7 +6362,9 @@ index2.Minimize = function(arg)
 	arg:Fly(arg.RestoreCenter, v9 + unit * tbl17.lead, 0.6)
 	local v10, v11 = arg:Merge(unit, true)
 	holder.Visible = false
-	v11()
+	if type(v11) == "function" then
+		v11()
+	end
 	arg:PopDock(3.2)
 	tbl5.tween(arg.DockState, 0.3, { Size = UDim2.fromOffset(0, 0) }, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 	arg.Minimized = true
