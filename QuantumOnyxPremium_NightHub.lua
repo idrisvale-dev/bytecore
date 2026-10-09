@@ -5907,7 +5907,7 @@ Restock: %s
 	tbl6.LoadLibrary = function()
 		-- Load NightHub from GitHub
 		local Library = loadstring(game:HttpGet(
-			"https://raw.githubusercontent.com/IDRIS-vx23/ByteCore/main/Library/NightHub.lua"
+			"https://raw.githubusercontent.com/idrisvale-dev/bytecore/refs/heads/byte/Library/NightHub.lua"
 		))()
 
 		if not Library or not Library.CreateWindow then
