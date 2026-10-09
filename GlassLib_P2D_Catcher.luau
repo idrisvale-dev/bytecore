@@ -61,8 +61,9 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
     end
 
     local args = { ... }
+    local callArgs = { ... }
     local ok, result = pcall(function()
-        return oldNamecall(self, ...)
+        return oldNamecall(self, table.unpack(callArgs))
     end)
 
     if method == "SetControlPoints" then
