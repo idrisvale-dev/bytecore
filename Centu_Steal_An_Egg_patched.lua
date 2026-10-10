@@ -31383,13 +31383,8 @@ return Library
 					function obj:SetContent(txt)
 						if para then pcall(function() para:Set(txt) end) end
 					end
-					function obj:Set(...)
-						local args = table.pack(...)
-						if para then
-							pcall(function()
-								para:Set(table.unpack(args, 1, args.n))
-							end)
-						end
+					function obj:Set(value)
+						if para then pcall(function() para:Set(value) end) end
 					end
 					return obj
 				end
