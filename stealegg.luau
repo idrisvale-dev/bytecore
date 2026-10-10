@@ -1,5 +1,3 @@
--- discord.gg/syncrypt
-
 local function geniter(f, s, c)
 	if type(f) ~= "function" then
 		local mt = getmetatable(f)
