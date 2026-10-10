@@ -1,5 +1,3 @@
--- discord.gg/syncrypt
-
 local v1 = ...
 local CFrame_ = CFrame
 local cFrameNew = CFrame_ and CFrame_.new
