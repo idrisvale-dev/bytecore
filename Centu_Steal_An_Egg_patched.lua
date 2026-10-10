@@ -31384,7 +31384,12 @@ return Library
 						if para then pcall(function() para:Set(txt) end) end
 					end
 					function obj:Set(...)
-						if para then pcall(function() para:Set(...) end) end
+						local args = table.pack(...)
+						if para then
+							pcall(function()
+								para:Set(table.unpack(args, 1, args.n))
+							end)
+						end
 					end
 					return obj
 				end
