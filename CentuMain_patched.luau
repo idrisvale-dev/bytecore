@@ -257,9 +257,8 @@ until game:IsLoaded() and game.Players.LocalPlayer
 repeat
 	wait()
 until game:FindFirstChild("CoreGui")
-local __executorName = type(identifyexecutor) == "function" and identifyexecutor() or ""
 getgenv().ExploitReq = syn and syn.request
-	or __executorName == "Fluxus" and request
+	or (type(identifyexecutor) == "function" and identifyexecutor() == "Fluxus") and request
 	or http_request
 	or (http and http.request)
 	or requests
