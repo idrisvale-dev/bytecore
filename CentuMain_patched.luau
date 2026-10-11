@@ -1704,7 +1704,7 @@ game:GetService("Players").LocalPlayer.Idled:connect(function()
 	wait(1)
 	vu:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
 end)
-local -- ═══════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════
 -- CENTU MAIN — Banana Cat UI shim (zzzz.lua → CentuDoxUI)
 -- ═══════════════════════════════════════════════════════════════════
 local _CentuLib = (function()
