@@ -2,7 +2,7 @@
 -- i-inject lang ito sa Delta, walang kailangan na script
 
 local Library = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/IDRIS-vx23/ByteCore/main/Library/Library.lua"
+    "https://raw.githubusercontent.com/idrisvale-dev/bytecore/refs/heads/byte/Library/Library_Glass.lua"
 ))()
 
 local Window = Library:CreateWindow({ Title = "Library Test" })
