@@ -3995,20 +3995,22 @@ function HopLessAll()
 		writefile("Banana Cat Hub/NotSameServers.json", game:GetService("HttpService"):JSONEncode(R))
 	end
 	function HopServerLess()
-		local l, Q =
-			if m == ""
-				then (game.HttpService:JSONDecode(
-					game:HttpGet("https://games.roblox.com/v1/games/" .. K .. "/servers/Public?sortOrder=Asc&limit=100")
-				))
-				else (game.HttpService:JSONDecode(
-					game:HttpGet(
-						"https://games.roblox.com/v1/games/"
-							.. K
-							.. "/servers/Public?sortOrder=Asc&limit=100&cursor="
-							.. m
-					)
-				)),
-			""
+		local l, Q
+		if m == "" then
+			l = game.HttpService:JSONDecode(
+				game:HttpGet("https://games.roblox.com/v1/games/" .. K .. "/servers/Public?sortOrder=Asc&limit=100")
+			)
+		else
+			l = game.HttpService:JSONDecode(
+				game:HttpGet(
+					"https://games.roblox.com/v1/games/"
+						.. K
+						.. "/servers/Public?sortOrder=Asc&limit=100&cursor="
+						.. m
+				)
+			)
+		end
+		Q = ""
 		local K = l.nextPageCursor and l.nextPageCursor ~= "null" and l.nextPageCursor ~= nil
 		if K then
 			m = l.nextPageCursor
@@ -4020,7 +4022,9 @@ function HopLessAll()
 			if tonumber(S.maxPlayers) > tonumber(S.playing) and tonumber(S.playing) <= 3 then
 				for l, l in pairs(R) do
 					if K ~= 0 then
-						m = if Q == tostring(l) then false else m
+						if Q == tostring(l) then
+							m = false
+						end
 					elseif tonumber(E) ~= tonumber(l) then
 						pcall(function()
 							delfile("Banana Cat Hub/NotSameServers.json")
@@ -4066,7 +4070,14 @@ function CheckMoon()
 		"http://www.roblox.com/asset/?id=9709149052",
 		MoonTextureId(),
 		"Bad Moon"
-	return if m == K or m == R then if m == K then "Full Moon" else if m == R then "Next Night" else E else E
+	if m == K or m == R then
+		if m == K then
+			return "Full Moon"
+		elseif m == R then
+			return "Next Night"
+		end
+	end
+	return E
 end
 function function6()
 	return math.floor(game.Lighting.ClockTime)
@@ -7673,11 +7684,13 @@ local function B()
 			end)
 			if q and c and c.Display then
 				local H, q = c.Display.Category, c.Index and c.Index.StorageKey
-				local D, r =
-					if H == "Blox Fruit"
-						then q or c.Display.Name or "ItemId_" .. F.ItemId
-						else c.Display.Name or q or "ItemId_" .. F.ItemId,
-					V:ReadItem(J.MASTERY, F.ItemId, F.NetworkedUID) or 0
+				local D, r
+				if H == "Blox Fruit" then
+					D = q or c.Display.Name or "ItemId_" .. F.ItemId
+				else
+					D = c.Display.Name or q or "ItemId_" .. F.ItemId
+				end
+				r = V:ReadItem(J.MASTERY, F.ItemId, F.NetworkedUID) or 0
 				table.insert(
 					C,
 					{ Name = D, Type = H, Count = F.Value, Mastery = r, ItemId = F.ItemId, UID = F.NetworkedUID }
